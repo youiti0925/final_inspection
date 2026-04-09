@@ -1,0 +1,58 @@
+# PocketBase のセットアップ手順 🛠️
+
+Reactアプリ側のプログラム（FirebaseをPocketBaseに置き換える作業）は完了しました。
+続いて、**社内のPC（サーバー役）** でPocketBaseを立ち上げる必要があります。
+
+## 1. PocketBaseのダウンロード
+1. [PocketBaseの公式サイト (pocketbase.io)](https://pocketbase.io/) にアクセスします。
+2. Windows用のファイル（通常は `pocketbase_X.X.X_windows_amd64.zip`）をダウンロードします。
+3. ダウンロードした ZIP ファイルを解凍します。
+4. 解凍したフォルダ内に `pocketbase.exe` というファイルがあることを確認します。
+
+## 2. PocketBaseの起動
+1. 解凍したフォルダを開きます。
+2. アドレスバー（フォルダの上部）に `cmd` と入力して Enter キーを押し、コマンドプロンプトを開きます。
+3. 以下のコマンドを入力して Enter を押します。
+   ```bash
+   pocketbase serve
+   ```
+4. 黒い画面に起動メッセージが表示されれば成功です！
+   * `http://127.0.0.1:8090/` (API用)
+   * `http://127.0.0.1:8090/_/` (管理画面用)
+
+## 3. データベースの初期設定 (管理画面)
+PocketBaseはFirebaseとは異なり、「あらかじめデータベースのテーブル（コレクション）を作成しておく」必要があります。
+
+1. ブラウザで `http://127.0.0.1:8090/_/` にアクセスします。
+2. 最初だけ、管理者のメールアドレスとパスワードを登録する画面が出ますので、適当に設定してログインします。
+3. 左側のメニューから **「New collection」** をクリックし、以下の3つのコレクションを作成します。（Firebaseの構成に合わせます）
+
+### ① `lots` コレクションの作成
+* **Name**: `lots`
+* **API Rules** (右上の歯車マークの隣の盾マーク): 全ての項目（List, View, Create, Update, Delete）の鍵マーク🔓を開き、「誰でもアクセス可能」にしてSaveします。※本格運用時は認証をかけますが、まずは動かすためです。
+* 以下のフィールドを追加します (New fieldボタン):
+  * `orderNo` (Text)
+  * `model` (Text)
+  * `quantity` (Number)
+  * `status` (Text)
+  * `tasks` (JSON)
+  * `steps` (JSON)
+  * その他、元々アプリで使用していたデータ分はPocketBaseがJSONでよしなに保存してくれますが、明示的に列を持たせることも可能です。
+
+### ② `workers` コレクションの作成
+* **Name**: `workers`
+* **API Rules**: 全て🔓マークを開きます。
+* フィールド:
+  * `name` (Text)
+
+### ③ `settings` コレクションの作成
+* **Name**: `settings`
+* **API Rules**: 全て🔓マークを開きます。
+* フィールド:
+  * 特に追加しなくても、JSONデータとして最初の設定値が丸ごと1行保存されます。
+
+---
+以上でサーバーの準備は完了です。
+
+現在、Reactアプリ側（Viteサーバー）は `http://localhost:5174` で起動しています。
+PocketBaseサーバー（黒い画面）を起動したままの状態でブラウザから React アプリを開くと、データベースを PocketBase にして動作するはずです！

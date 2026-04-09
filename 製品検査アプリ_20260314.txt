@@ -1,0 +1,2289 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  Layout, ClipboardList, Package, 
+  PlayCircle, CheckCircle2, AlertTriangle, 
+  Settings, Plus, Trash2, 
+  BarChart3, Download,
+  ArrowRight, Wifi, WifiOff,
+  Clock, StopCircle, AlertOctagon,
+  Map as MapIcon, Upload, Move,
+  Camera, X, ChevronRight, ChevronLeft,
+  Maximize2, Check, Play, SkipForward,
+  FileText, Share2, FileSpreadsheet,
+  Pencil, Save, ArrowUp, ArrowDown,
+  Brush, Type, Square, Circle, MoveDiagonal, Undo2, Mic, Sparkles, Image as ImageIcon,
+  FileUp, FileJson, DownloadCloud, RefreshCw,
+  User, Calendar, LogOut, Users, Edit, Grip, LayoutGrid, MapPin, Eye, Filter, List,
+  Bot, Zap, TrendingUp, Activity, Target, Timer, Layers, AlertCircle, Loader2, Database, ShieldCheck, HelpCircle, Copy, Radio, PenTool
+} from 'lucide-react';
+
+// --- Firebase Imports (SDK v9) ---
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, 
+  serverTimestamp 
+} from "firebase/firestore";
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+} from "firebase/auth";
+
+// --- Global Constants & Config ---
+// 修正: IDを固定化して、どの端末からでも同じデータを参照できるようにする
+const APP_DATA_ID = "genba-visual-shared-v1"; 
+
+// ★★★ ここにあなたのFirebaseプロジェクトの設定値を貼り付けてください ★★★
+const USER_DEFINED_CONFIG = {
+  apiKey: "AIzaSyDiIS-TDH6MgXaLvG9T2VRioFDomQ_zQ9E",
+  authDomain: "inspection-time-c4fd3.firebaseapp.com",
+  projectId: "inspection-time-c4fd3",
+  storageBucket: "inspection-time-c4fd3.firebasestorage.app",
+  messagingSenderId: "750297489065",
+  appId: "1:750297489065:web:b19e30920b2c68182fd3b8",
+  measurementId: "G-MP8Z6ZFLZT"
+};
+
+// 環境変数（プレビュー用）またはユーザー定義の設定を使用
+// ユーザー定義がある場合はそれを優先する
+const FIREBASE_CONFIG = (USER_DEFINED_CONFIG.apiKey && USER_DEFINED_CONFIG.apiKey.length > 0)
+  ? USER_DEFINED_CONFIG 
+  : (typeof __firebase_config !== 'undefined' && __firebase_config ? JSON.parse(__firebase_config) : {});
+
+
+const COLORS = {
+  primary: '#2563eb',
+  success: '#10b981',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+  slate: '#64748b'
+};
+
+const STAMPS = [
+    { label: '①', val: '①' }, { label: '②', val: '②' }, { label: '③', val: '③' }, { label: '④', val: '④' }, { label: '⑤', val: '⑤' },
+    { label: '✅', val: '✅' }, { label: '❌', val: '❌' }, { label: '⚠️', val: '⚠️' }, { label: '🔥', val: '🔥' }, { label: '⚡', val: '⚡' },
+    { label: '👈', val: '👈' }, { label: '👉', val: '👉' }, { label: '🛑', val: '🛑' },
+    { label: '確認', val: '確認' }, { label: 'ヨシ!', val: 'ヨシ!' }, { label: '危険', val: '危険' }, { label: 'OK', val: 'OK' }, { label: 'NG', val: 'NG' },
+];
+
+const INITIAL_MAP_ZONES = [
+  // 上段
+  { id: 'zone_inter_1', name: '中間分割1', x: 2, y: 5, w: 22, h: 40, color: 'bg-blue-50/80 border-blue-300' },
+  { id: 'zone_inter_2', name: '中間分割2', x: 26, y: 5, w: 22, h: 40, color: 'bg-blue-50/80 border-blue-300' },
+  { id: 'zone_inter_v', name: '中間分割縦', x: 50, y: 5, w: 22, h: 40, color: 'bg-indigo-50/80 border-indigo-300' },
+  { id: 'zone_comp_v1', name: '完品分割縦1', x: 74, y: 5, w: 22, h: 40, color: 'bg-emerald-50/80 border-emerald-300' },
+  // 下段
+  { id: 'zone_assembly_1', name: '第一組立エリア', x: 2, y: 50, w: 22, h: 40, color: 'bg-amber-50/80 border-amber-300' },
+  { id: 'zone_assembly_3', name: '第三組立エリア', x: 26, y: 50, w: 22, h: 40, color: 'bg-orange-50/80 border-orange-300' },
+  { id: 'zone_comp_v2', name: '完品分割縦2', x: 50, y: 50, w: 22, h: 40, color: 'bg-emerald-50/80 border-emerald-300' },
+  { id: 'zone_comp_h', name: '完品分割横', x: 74, y: 50, w: 22, h: 40, color: 'bg-emerald-50/80 border-emerald-300' },
+];
+
+// --- Utilities ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+const formatTime = (sec) => { 
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60); 
+  const s = Math.floor(sec % 60); 
+  if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`; 
+};
+const toDatetimeLocal = (timestamp) => {
+  const d = new Date(timestamp);
+  const pad = (n) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const toDateShort = (timestamp) => {
+  if (!timestamp) return '-';
+  const d = new Date(timestamp);
+  return `${d.getMonth()+1}/${d.getDate()}`;
+};
+const formatDateSafe = (ts) => ts ? new Date(ts).toLocaleString() : '-';
+
+const resizeImage = (file) => new Promise((resolve) => { const r = new FileReader(); r.onload = (e) => { const i = new Image(); i.onload = () => { const c = document.createElement('canvas'); const MAX = 1000; let w=i.width; let h=i.height; if(w>h){if(w>MAX){h*=MAX/w;w=MAX}}else{if(h>MAX){w*=MAX/h;h=MAX}} c.width=w; c.height=h; const ctx=c.getContext('2d'); if(ctx){ctx.drawImage(i,0,0,w,h); resolve(c.toDataURL('image/jpeg', 0.7));}else resolve(i.src); }; i.src = e.target?.result; }; r.readAsDataURL(file); });
+const getBase64 = (file) => new Promise((resolve) => { const r = new FileReader(); r.readAsDataURL(file); r.onload = () => resolve(r.result); r.onerror = () => resolve(""); });
+
+const calculateLotEstimatedTime = (lot) => {
+  const perUnitTime = lot.steps.reduce((sum, step) => sum + (step.targetTime || 0), 0);
+  return perUnitTime * (lot.quantity || 1);
+};
+
+// --- Mock Data ---
+const DEMO_STEPS = [
+  { id: 's1', title: '外観確認', description: 'キズ、汚れがないか目視で確認してください。', type: 'normal', executionMode: 'individual', targetTime: 30, images: [] },
+  { id: 's2', title: '自動加工', description: 'マシンにセットして開始ボタンを押してください。\n※加工中は他の作業が可能です。', type: 'normal', executionMode: 'batch', targetTime: 120, images: [] },
+  { id: 's3', title: '梱包', description: '付属品を確認して梱包してください。', type: 'normal', executionMode: 'individual', targetTime: 60, images: [] },
+];
+
+// --- 1. Basic Components ---
+
+const WorkerBadge = ({ id, workers }) => {
+  const w = workers.find(w => w.id === id);
+  if (!w) return <span className="text-[10px] text-slate-400 bg-slate-100 px-1 rounded">未割当</span>;
+  return (
+    <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-1 rounded flex items-center gap-1 border border-slate-200 truncate max-w-[80px]">
+      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></div>{w.name}
+    </span>
+  );
+};
+
+const LotCard = ({ lot, workers, templates, mapZones, onOpenExecution, saveData, setDraggedLotId, draggedLotId, variant = 'full', onEdit, onDelete }) => {
+  const [elapsed, setElapsed] = useState(0);
+  
+  useEffect(() => {
+    let interval;
+    if (lot.status === 'processing' && lot.workStartTime) {
+      setElapsed(Date.now() - lot.workStartTime);
+      interval = setInterval(() => {
+        setElapsed(Date.now() - lot.workStartTime);
+      }, 1000);
+    } else {
+      setElapsed(0);
+    }
+    return () => clearInterval(interval);
+  }, [lot.status, lot.workStartTime]);
+
+  const totalSeconds = Math.floor(((lot.totalWorkTime || 0) + elapsed) / 1000);
+  const timeDisplay = formatTime(totalSeconds);
+  const currentStep = lot.steps?.[lot.currentStepIndex];
+  const stepName = currentStep ? currentStep.title : '完了';
+  
+  let progress = 0;
+  if (lot.tasks) {
+      const totalTasks = lot.steps.length * lot.quantity;
+      const completedTasks = Object.values(lot.tasks).filter(t => t.status === 'completed').length;
+      progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+  } else {
+      progress = lot.steps ? (lot.currentStepIndex / lot.steps.length) * 100 : 0;
+  }
+  
+  const templateName = templates?.find(t => t.id === lot.templateId)?.name || '';
+  const zoneName = mapZones?.find(z => z.id === lot.mapZoneId)?.name || '';
+  
+  const styleClass = `relative w-full cursor-grab active:cursor-grabbing mb-2 shadow-sm bg-white border transition-all`;
+  const borderClass = lot.status === 'processing' ? 'border-blue-500 ring-2 ring-blue-100' : lot.status === 'error' ? 'border-rose-400 bg-rose-50' : lot.status === 'completed' ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-300 hover:border-blue-400';
+
+  if (variant === 'dashboard-arrival') {
+    return (
+      <div 
+        draggable={lot.status !== 'completed'}
+        onDragStart={(e) => { e.dataTransfer.setData('lotId', lot.id); setDraggedLotId(lot.id); e.stopPropagation(); }}
+        onDragEnd={() => setDraggedLotId(null)}
+        onClick={() => onEdit(lot)}
+        className={`${styleClass} ${borderClass} p-3 hover:shadow-md`}
+      >
+        <div className="flex justify-between items-start">
+           <div>
+             <div className="text-xs text-slate-500 font-bold mb-0.5">指図: {lot.orderNo}</div>
+             <div className="text-lg font-black text-slate-800 leading-tight">{lot.model}</div>
+           </div>
+           <div className="text-right">
+             <div className="text-xl font-black text-blue-600">{lot.quantity}<span className="text-xs text-slate-500 font-normal ml-0.5">台</span></div>
+             <div className="text-xs text-slate-400">{toDateShort(lot.entryAt)}入庫</div>
+           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (variant === 'dashboard-map') {
+    return (
+      <div 
+        draggable={lot.status !== 'completed'}
+        onDragStart={(e) => { e.dataTransfer.setData('lotId', lot.id); setDraggedLotId(lot.id); e.stopPropagation(); }}
+        onDragEnd={() => setDraggedLotId(null)}
+        onClick={() => lot.mapZoneId && lot.status !== 'completed' && onOpenExecution(lot)}
+        className={`${styleClass} ${borderClass} p-1.5 hover:scale-105 transition-transform`}
+      >
+        <div className="flex flex-col">
+           <div className="text-[10px] text-slate-500 font-bold leading-none mb-0.5">{lot.orderNo}</div>
+           <div className="text-sm font-black text-slate-800 leading-tight truncate">{lot.model}</div>
+           {lot.status === 'processing' && <div className="mt-1 h-1 bg-blue-100 rounded overflow-hidden"><div className="h-full bg-blue-500 animate-pulse" style={{width: '100%'}}></div></div>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      draggable={lot.status !== 'completed'}
+      onDragStart={(e) => { e.dataTransfer.setData('lotId', lot.id); setDraggedLotId(lot.id); e.stopPropagation(); }}
+      onDragEnd={() => setDraggedLotId(null)}
+      onClick={() => lot.mapZoneId && lot.status !== 'completed' && onOpenExecution(lot)}
+      className={`${styleClass} ${borderClass} ${draggedLotId === lot.id ? 'opacity-50' : 'opacity-100'}`}
+    >
+      <div className="absolute top-1 right-1 flex gap-1 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button onClick={(e)=>{e.stopPropagation(); onEdit(lot);}} className="p-1 bg-white rounded border hover:bg-blue-50 text-slate-500"><Pencil className="w-3 h-3"/></button>
+        <button onClick={(e)=>{e.stopPropagation(); onDelete(lot.id);}} className="p-1 bg-white rounded border hover:bg-red-50 text-red-400"><Trash2 className="w-3 h-3"/></button>
+      </div>
+
+      <div className="p-2">
+        <div className="flex justify-between items-start mb-1">
+          <div className="flex flex-col gap-0.5 w-full">
+            <div className="flex items-center gap-2 justify-between">
+              <span className="font-bold text-sm text-slate-800 flex items-center gap-1">
+                 {lot.orderNo}
+                 {lot.priority === 'high' && <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" title="急ぎ"></span>}
+              </span>
+              <span className="text-xs font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{lot.quantity}台</span>
+            </div>
+            <div className="text-[10px] text-slate-500 flex flex-wrap gap-1 items-center">
+               <span className="font-medium">{lot.model}</span>
+               {templateName && <span className="text-slate-400">| {templateName}</span>}
+            </div>
+             <div className="text-[10px] text-slate-400 flex flex-col">
+               {lot.entryAt && <span>入庫: {new Date(lot.entryAt).toLocaleString()}</span>}
+             </div>
+          </div>
+        </div>
+
+        {(lot.workerId || lot.mapZoneId) && (
+          <div className="mt-2 pt-2 border-t border-slate-100 flex flex-col gap-1">
+             <div className="flex justify-between items-center">
+                <WorkerBadge id={lot.workerId} workers={workers} />
+                {zoneName && <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded flex items-center gap-1"><MapPin className="w-3 h-3"/> {zoneName}</span>}
+             </div>
+             {variant !== 'simple' && (
+                 <>
+                    <div className="flex justify-between items-center text-[10px] mt-1">
+                        <span className="font-bold text-slate-700 truncate max-w-[100px]">{lot.tasks ? 'カスタム進行中' : stepName}</span>
+                        <span className={`font-mono ${lot.status === 'processing' ? 'text-blue-600 font-bold' : 'text-slate-400'}`}>
+                        <Clock className="w-3 h-3 inline mr-0.5" />{timeDisplay}
+                        </span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden flex">
+                        <div className={`h-full transition-all duration-500 ${lot.status === 'completed' ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${lot.status === 'completed' ? 100 : progress}%` }} />
+                    </div>
+                 </>
+             )}
+          </div>
+        )}
+      
+        {lot.mapZoneId && lot.status !== 'completed' && variant !== 'simple' && (
+          <div className="mt-1 text-center">
+             <div className="text-[10px] text-blue-600 font-bold py-1 group-hover:underline">
+               {lot.status === 'processing' ? '作業画面を開く' : '作業を開始する'}
+             </div>
+          </div>
+        )}
+        
+        {lot.status === 'error' && (
+          <button onClick={(e) => { e.stopPropagation(); saveData('lots', lot.id, { status: 'waiting' }); }} className="w-full mt-1 bg-white border border-rose-300 text-rose-600 text-[10px] py-1 rounded hover:bg-rose-50 font-medium z-20 relative">復帰</button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const WorkerSummaryCard = ({ worker, lots }) => {
+  const plannedLots = lots.filter(l => l.location === 'planned' && l.workerId === worker.id);
+  const plannedTime = plannedLots.reduce((acc, lot) => acc + calculateLotEstimatedTime(lot), 0);
+  const completedLots = lots.filter(l => l.location === 'completed' && l.workerId === worker.id);
+  const completedTime = completedLots.reduce((acc, lot) => acc + (lot.totalWorkTime || 0)/1000, 0);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-sm flex flex-col gap-2">
+      <div className="flex items-center gap-2 border-b pb-2">
+         <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
+            <User className="w-5 h-5"/>
+         </div>
+         <span className="font-bold text-lg text-slate-800">{worker.name}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-center">
+         <div className="bg-blue-50 rounded p-2">
+            <div className="text-[10px] text-blue-500 font-bold mb-1">予定(残)</div>
+            <div className="text-base font-black text-blue-700 font-mono">{formatTime(plannedTime)}</div>
+         </div>
+         <div className="bg-emerald-50 rounded p-2">
+            <div className="text-[10px] text-emerald-500 font-bold mb-1">実績(済)</div>
+            <div className="text-base font-black text-emerald-700 font-mono">{formatTime(completedTime)}</div>
+         </div>
+      </div>
+    </div>
+  );
+};
+
+const ZoneList = ({ id, title, icon: Icon, color, border, children, onDropLot, onClickHeader, active = false }) => (
+  <div 
+    onDragOver={(e) => e.preventDefault()}
+    onDrop={(e) => {
+      e.preventDefault();
+      const lotId = e.dataTransfer.getData('lotId');
+      if (lotId) onDropLot(lotId, id);
+    }}
+    className={`rounded-xl border-2 flex flex-col transition-all duration-300 ${color} ${border} h-full ${active ? 'ring-4 ring-blue-200 shadow-xl scale-[1.01]' : 'hover:shadow-md'}`}
+  >
+    <div 
+      onClick={onClickHeader}
+      className={`p-3 border-b border-black/5 flex justify-between items-center bg-white/60 rounded-t-[10px] backdrop-blur-sm cursor-pointer hover:bg-white/80 group`}
+    >
+      <h2 className="font-bold text-slate-800 flex items-center gap-2 text-sm group-hover:text-blue-600 transition-colors">
+        <Icon className="w-4 h-4 opacity-70" /> {title}
+        <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded ml-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+           <Maximize2 className="w-3 h-3"/> Clickで拡大
+        </span>
+      </h2>
+      <span className="text-xs font-bold bg-white/80 px-2 py-0.5 rounded text-slate-500 border border-black/5">{React.Children.count(children)}</span>
+    </div>
+    <div className="flex-1 p-2 overflow-y-auto min-h-[100px]">
+      {children}
+    </div>
+  </div>
+);
+
+// --- Debug Status Component (With Test Write & Reload) ---
+const DebugStatus = ({ isConnected, user, dataCounts, syncStatus, appId, errorMsg, dataSource, onTestWrite, projectId, onReload }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  if (!isExpanded) {
+    return (
+      <button 
+        onClick={() => setIsExpanded(true)}
+        className="fixed bottom-4 left-4 z-[9999] bg-slate-800 text-white p-2 rounded-full shadow-lg hover:bg-slate-700 border-2 border-slate-600"
+      >
+        <Activity className="w-5 h-5" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-4 left-4 z-[9999] bg-slate-900/95 text-slate-300 p-4 rounded-xl shadow-2xl border-2 border-slate-700 w-80 text-xs font-mono backdrop-blur">
+      <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-700">
+        <h3 className="font-bold text-white flex items-center gap-2">
+          <Database className="w-4 h-4 text-blue-400" /> System Monitor
+        </h3>
+        <button onClick={() => setIsExpanded(false)} className="text-slate-500 hover:text-white"><X className="w-4 h-4"/></button>
+      </div>
+      
+      <div className="space-y-3">
+        {/* Project Info */}
+        <div className="flex justify-between items-center">
+            <span>Project:</span>
+            <span className="font-bold text-slate-100 truncate max-w-[150px]">{projectId}</span>
+        </div>
+
+        {/* Auth Status */}
+        <div className="flex justify-between items-center">
+          <span>Auth:</span>
+          {user ? (
+            <span className="text-emerald-400 flex items-center gap-1 font-bold"><ShieldCheck className="w-3 h-3"/> {user.isAnonymous ? 'Anonymous' : 'Authenticated'}</span>
+          ) : (
+            <span className="text-rose-400 font-bold flex items-center gap-1"><WifiOff className="w-3 h-3"/> Disconnected</span>
+          )}
+        </div>
+
+        {/* Data Source */}
+        <div className="flex justify-between items-center">
+          <span>Connection:</span>
+          <span className={`font-bold flex items-center gap-1 ${dataSource.includes('Server') ? 'text-emerald-400' : 'text-amber-400'}`}>
+            <Radio className="w-3 h-3"/> {dataSource}
+          </span>
+        </div>
+
+        {/* Sync Status */}
+        <div className="flex justify-between items-center">
+          <span>Sync:</span>
+          {syncStatus === 'syncing' ? (
+            <span className="text-blue-400 flex items-center gap-1 font-bold"><Loader2 className="w-3 h-3 animate-spin"/> Saving...</span>
+          ) : syncStatus === 'error' ? (
+             <span className="text-rose-500 flex items-center gap-1 font-bold"><AlertCircle className="w-3 h-3"/> Error</span>
+          ) : (
+             <span className="text-slate-400">Idle</span>
+          )}
+        </div>
+
+        {/* Error Message */}
+        {errorMsg && (
+            <div className="bg-rose-900/50 p-2 rounded border border-rose-800 text-rose-200">
+                <div className="font-bold mb-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Error Log</div>
+                <div className="break-all opacity-80">{errorMsg}</div>
+            </div>
+        )}
+
+        {/* Data Counts */}
+        <div className="bg-slate-800 p-2 rounded border border-slate-600 space-y-1">
+           <div className="flex justify-between"><span>Active Lots:</span><span className="text-white font-bold">{dataCounts.lots}</span></div>
+           <div className="flex justify-between"><span>Templates:</span><span className="text-white font-bold">{dataCounts.templates}</span></div>
+           <div className="flex justify-between"><span>Workers:</span><span className="text-white font-bold">{dataCounts.workers}</span></div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex gap-2">
+            <button 
+                onClick={onTestWrite} 
+                className="flex-1 bg-blue-700 hover:bg-blue-600 text-white font-bold py-1.5 rounded flex items-center justify-center gap-2 transition-colors"
+            >
+                <PenTool className="w-3 h-3"/> 書き込みテスト
+            </button>
+            <button 
+                onClick={onReload} 
+                className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-1.5 rounded flex items-center justify-center gap-2 transition-colors"
+            >
+                <RefreshCw className="w-3 h-3"/> データ再取得
+            </button>
+        </div>
+
+        {/* Path Info */}
+        <div className="bg-blue-900/20 p-2 rounded border border-blue-900 text-blue-200 group relative">
+           <div className="flex items-center justify-between mb-1 font-bold">
+               <span className="flex items-center gap-1"><HelpCircle className="w-3 h-3"/> 保存先パス</span>
+               <button onClick={() => navigator.clipboard.writeText(`artifacts/${appId}/public/data`)} className="hover:text-white"><Copy className="w-3 h-3"/></button>
+           </div>
+           <div className="break-all text-[10px] opacity-70 select-all">
+              artifacts/{appId}/public/data
+           </div>
+           <div className="mt-2 text-[9px] text-slate-400">
+               ※ID固定化済み: {appId}
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+// ----------------------------------------------------------------------
+// 2. Complex & Functional Components
+// ----------------------------------------------------------------------
+
+const InteractiveMap = ({ lots, workers, templates, handleMoveLot, saveData, setDraggedLotId, draggedLotId, onEditLot, onDeleteLot, setExecutionLotId, settings, handleImageUpload, saveSettings, mapZones, isDashboard = false }) => {
+  const [isLayoutMode, setIsLayoutMode] = useState(false);
+  const [localZones, setLocalZones] = useState(mapZones);
+  const mapRef = useRef(null);
+
+  useEffect(() => {
+    setLocalZones(mapZones);
+  }, [mapZones]);
+
+  const handleZoneDragStart = (e, zoneId) => {
+    if (!isLayoutMode) return;
+    e.dataTransfer.setData('zoneId', zoneId);
+    e.stopPropagation();
+  };
+
+  const handleMapDrop = (e) => {
+    e.preventDefault();
+    if (!mapRef.current) return;
+    
+    const zoneId = e.dataTransfer.getData('zoneId');
+    if (zoneId && isLayoutMode) {
+      const rect = mapRef.current.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      const newZones = localZones.map(z => z.id === zoneId ? { ...z, x: Math.max(0, Math.min(100-z.w, x)), y: Math.max(0, Math.min(100-z.h, y)) } : z);
+      setLocalZones(newZones);
+    }
+  };
+
+  const saveLayout = () => {
+    saveSettings({ mapZones: localZones });
+    setIsLayoutMode(false);
+  };
+
+  const headerContent = (
+      <div className="p-3 bg-white/90 backdrop-blur border-b border-slate-200 flex justify-between items-center z-20 shrink-0">
+          <h2 className="font-bold text-slate-800 flex items-center gap-2"><MapIcon className="w-5 h-5 text-blue-600" /> 作業エリア</h2>
+          <div className="flex items-center gap-2">
+             <label className="text-xs flex items-center gap-1 cursor-pointer bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded border">
+                <Upload className="w-3 h-3" /> 背景
+                <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+             </label>
+             <button onClick={() => isLayoutMode ? saveLayout() : setIsLayoutMode(true)} className={`text-xs flex items-center gap-1 px-3 py-1 rounded border font-bold transition-colors ${isLayoutMode ? 'bg-green-600 text-white border-green-700' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>
+               {isLayoutMode ? <><Save className="w-3 h-3"/> レイアウト保存</> : <><LayoutGrid className="w-3 h-3"/> レイアウト編集</>}
+             </button>
+          </div>
+       </div>
+  );
+
+  return (
+    <div className={`rounded-xl border-2 border-blue-400 h-full shadow-lg relative bg-white overflow-hidden flex flex-col ${isDashboard ? 'cursor-pointer' : ''}`}>
+       {!isDashboard && headerContent}
+       {isDashboard && (
+         <div className="absolute top-2 left-2 z-30 bg-white/80 backdrop-blur px-3 py-1 rounded-full border shadow-sm pointer-events-none">
+           <span className="text-xs font-bold text-blue-800 flex items-center gap-1"><MapIcon className="w-3 h-3"/> 作業エリア (Clickで拡大)</span>
+         </div>
+       )}
+       <div ref={mapRef} onDragOver={(e) => e.preventDefault()} onDrop={handleMapDrop} className="flex-1 relative bg-slate-50 overflow-hidden" style={{ backgroundImage: settings.mapImage ? `url(${settings.mapImage})` : 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: settings.mapImage ? 'contain' : '20px 20px', backgroundRepeat: 'no-repeat', backgroundPosition: 'center' }}>
+         {localZones.map(zone => (
+           <div key={zone.id} draggable={isLayoutMode} onDragStart={(e) => handleZoneDragStart(e, zone.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const lotId = e.dataTransfer.getData('lotId'); if (lotId && !isLayoutMode) { handleMoveLot(lotId, zone.id); }}} className={`absolute border-2 rounded-lg flex flex-col overflow-hidden transition-colors ${zone.color || 'bg-white/80 border-slate-300'} ${isLayoutMode ? 'cursor-move border-dashed border-blue-500 z-50' : 'z-10'}`} style={{ left: `${zone.x}%`, top: `${zone.y}%`, width: `${zone.w}%`, height: `${zone.h}%` }}>
+             <div className="bg-black/10 px-2 py-1 text-[10px] font-bold text-slate-700 truncate select-none flex justify-between shrink-0"><span>{zone.name}</span><span className="bg-white/50 px-1 rounded">{lots.filter(l => l.mapZoneId === zone.id && l.location !== 'completed').length}</span></div>
+             <div className="flex-1 overflow-y-auto p-1 space-y-1">
+               {lots.filter(l => l.mapZoneId === zone.id && l.location !== 'completed').map(lot => (
+                 <LotCard 
+                   key={lot.id} lot={lot} workers={workers} templates={templates} mapZones={mapZones}
+                   onOpenExecution={(l) => setExecutionLotId(l.id)} 
+                   saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId}
+                   onEdit={onEditLot} onDelete={onDeleteLot} 
+                   variant={isDashboard ? 'dashboard-map' : 'full'} // マップ上の表示モード切替
+                 />
+               ))}
+               {lots.filter(l => l.mapZoneId === zone.id && l.location !== 'completed').length === 0 && !isLayoutMode && !isDashboard && (<div className="h-full flex items-center justify-center text-black/10 text-[10px]">Drop Here</div>)}
+             </div>
+             {isLayoutMode && <div className="absolute bottom-0 right-0 w-3 h-3 bg-blue-500 cursor-nwse-resize rounded-tl"/>}
+           </div>
+         ))}
+       </div>
+    </div>
+  );
+};
+
+const TemplateEditor = ({ template, onSave, onCancel }) => {
+  const [name, setName] = useState(template?.name || '');
+  const [steps, setSteps] = useState(template?.steps || []);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [type, setType] = useState('normal');
+  const [targetTime, setTargetTime] = useState(0);
+  const [images, setImages] = useState([]);
+  const [activeImgIdx, setActiveImgIdx] = useState(0);
+  const [pdfData, setPdfData] = useState(null);
+  const [editingStepId, setEditingStepId] = useState(null);
+  
+  // Drawing State
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [drawTool, setDrawTool] = useState('pen');
+  const [drawColor, setDrawColor] = useState('#FF0000');
+  const [selectedStampVal, setSelectedStampVal] = useState('⚠️');
+  const [textToDraw, setTextToDraw] = useState('');
+  const [isDrawing, setIsDrawing] = useState(false);
+  const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const pdfInputRef = useRef(null);
+
+  useEffect(() => {
+    if (isDrawingMode && images[activeImgIdx] && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      img.src = images[activeImgIdx];
+      img.onload = () => { canvas.width = img.width; canvas.height = img.height; ctx?.drawImage(img, 0, 0); };
+    }
+  }, [isDrawingMode, activeImgIdx]);
+
+  const startDrawing = (e) => {
+    setIsDrawing(true);
+    const ctx = canvasRef.current?.getContext('2d');
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if(!ctx || !rect) return;
+    const getPos = (evt) => {
+      const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+      const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+      return { x: (clientX - rect.left) * (ctx.canvas.width / rect.width), y: (clientY - rect.top) * (ctx.canvas.height / rect.height) };
+    };
+    const pos = getPos(e);
+    if (drawTool === 'stamp') {
+      ctx.font = 'bold 60px sans-serif'; ctx.fillStyle = 'red'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(selectedStampVal, pos.x, pos.y); setIsDrawing(false);
+    } else if (drawTool === 'text') {
+      if (!textToDraw) return; ctx.font = 'bold 40px sans-serif'; ctx.fillStyle = drawColor; ctx.fillText(textToDraw, pos.x, pos.y); setIsDrawing(false);
+    } else {
+      ctx.beginPath(); ctx.moveTo(pos.x, pos.y); ctx.strokeStyle = drawColor; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    }
+  };
+
+  const draw = (e) => {
+    if(!isDrawing || !canvasRef.current || drawTool === 'stamp' || drawTool === 'text') return;
+    const ctx = canvasRef.current.getContext('2d');
+    const rect = canvasRef.current.getBoundingClientRect();
+    const getPos = (evt) => {
+        const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+        const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+        return { x: (clientX - rect.left) * (ctx.canvas.width / rect.width), y: (clientY - rect.top) * (ctx.canvas.height / rect.height) };
+    };
+    const pos = getPos(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  };
+
+  const saveDrawing = () => { if(canvasRef.current) { const newImg = canvasRef.current.toDataURL('image/jpeg', 0.8); const n = [...images]; n[activeImgIdx] = newImg; setImages(n); } setIsDrawingMode(false); };
+  const handleImageUpload = async (e) => { const file = e.target.files?.[0]; if (file) { const img = await resizeImage(file); setImages(prev => [...prev, img]); setActiveImgIdx(images.length); } };
+  const handlePdfUpload = async (e) => { const file = e.target.files?.[0]; if (file) { try { const base64 = await getBase64(file); setPdfData(base64); alert('PDF添付'); } catch { alert('PDFエラー'); } } };
+  const toggleListening = () => { const SR = (window).SpeechRecognition || (window).webkitSpeechRecognition; if (!SR) return alert('非対応'); const r = new SR(); r.lang = 'ja-JP'; r.onresult = (e) => setDescription(p => p + e.results[0][0].transcript); r.start(); };
+  const addStep = () => { if (!title) return alert('工程名入力'); const newStep = { id: editingStepId || generateId(), title, description, type, targetTime, images, pdfData }; if (editingStepId) { setSteps(steps.map(s => s.id === editingStepId ? newStep : s)); } else { setSteps([...steps, newStep]); } resetInput(); };
+  const resetInput = () => { setTitle(''); setDescription(''); setType('normal'); setTargetTime(0); setImages([]); setPdfData(null); setEditingStepId(null); };
+  const editStep = (s) => { setEditingStepId(s.id); setTitle(s.title); setDescription(s.description); setType(s.type); setTargetTime(s.targetTime); setImages(s.images || []); setPdfData(s.pdfData || null); };
+  const deleteStep = (id) => setSteps(steps.filter(s => s.id !== id));
+  const moveStep = (index, direction) => { const newSteps = [...steps]; if (direction === 'up' && index > 0) { [newSteps[index-1], newSteps[index]] = [newSteps[index], newSteps[index-1]]; } else if (direction === 'down' && index < steps.length-1) { [newSteps[index+1], newSteps[index]] = [newSteps[index], newSteps[index+1]]; } setSteps(newSteps); };
+  const handleSave = () => { 
+    if (!name.trim()) return alert('テンプレート名を入力してください');
+    if (steps.length === 0) return alert('少なくとも1つの工程を追加してください');
+    onSave({ id: template?.id, name, steps }); 
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-slate-50 rounded-xl overflow-hidden relative">
+      {isDrawingMode && (
+        <div className="absolute inset-0 z-50 bg-black flex flex-col">
+           <div className="flex justify-between items-center p-4 text-white bg-black/50">
+             <span className="font-bold">画像編集</span><div className="flex gap-2"><button onClick={()=>setIsDrawingMode(false)} className="px-4 py-2 bg-white/20 rounded">キャンセル</button><button onClick={saveDrawing} className="px-4 py-2 bg-blue-600 rounded font-bold">完了</button></div>
+           </div>
+           <div className="flex-1 bg-gray-900 flex items-center justify-center touch-none overflow-hidden">
+             <canvas ref={canvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={()=>{setIsDrawing(false)}} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={()=>{setIsDrawing(false)}} className="max-w-full max-h-full object-contain" />
+           </div>
+           <div className="bg-white p-2 pb-6 flex flex-col gap-2">
+             <div className="flex gap-2 justify-center pb-2">
+               <button onClick={()=>setDrawTool('pen')} className={`p-3 rounded-lg flex flex-col items-center ${drawTool==='pen'?'bg-blue-100 text-blue-600':'bg-slate-100'}`}><Brush/><span className="text-[10px]">ペン</span></button>
+               <button onClick={()=>setDrawTool('stamp')} className={`p-3 rounded-lg flex flex-col items-center ${drawTool==='stamp'?'bg-blue-100 text-blue-600':'bg-slate-100'}`}><AlertTriangle/><span className="text-[10px]">スタンプ</span></button>
+               <button onClick={()=>setDrawTool('text')} className={`p-3 rounded-lg flex flex-col items-center ${drawTool==='text'?'bg-blue-100 text-blue-600':'bg-slate-100'}`}><Type/><span className="text-[10px]">文字</span></button>
+             </div>
+             {drawTool==='stamp' && ( <div className="flex gap-2 overflow-x-auto pb-2">{STAMPS.map(s=><button key={s.label} onClick={()=>setSelectedStampVal(s.val)} className={`flex-none px-3 py-2 rounded border text-lg ${selectedStampVal===s.val?'bg-blue-100 border-blue-500':'bg-white'}`}>{s.label}</button>)}</div> )}
+             {drawTool==='text' && ( <div className="flex gap-2 p-2"><input value={textToDraw} onChange={e=>setTextToDraw(e.target.value)} placeholder="文字を入力" className="border p-2 rounded flex-1"/></div> )}
+             {drawTool!=='stamp' && ( <div className="flex gap-4 mx-auto">{['#FF0000','#FFFF00','#0000FF','#00FF00','#FFFFFF'].map(c=><button key={c} onClick={()=>setDrawColor(c)} className={`w-8 h-8 rounded-full border-2 ${drawColor===c?'border-slate-800 scale-110':'border-transparent'}`} style={{backgroundColor:c}}/>)}</div> )}
+           </div>
+        </div>
+      )}
+      <div className="bg-white p-4 border-b flex justify-between items-center">
+        <div className="flex items-center gap-2 flex-1"><button onClick={onCancel} className="p-2 hover:bg-slate-100 rounded-full"><ArrowRight className="w-5 h-5 rotate-180"/></button><input value={name} onChange={e => setName(e.target.value)} placeholder="テンプレート名" className="text-lg font-bold border-none focus:ring-0 w-full"/></div>
+        {/* Fixed: button type explicitly set to button */}
+        <button type="button" onClick={handleSave} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-blue-700 z-50 relative"><Save className="w-4 h-4"/> 保存</button>
+      </div>
+      <div className="flex-1 flex overflow-hidden">
+        <div className="w-1/3 p-4 overflow-y-auto border-r bg-white">
+          <div className="space-y-2">{steps.map((s, i) => (<div key={s.id} className={`p-3 border rounded-lg flex gap-3 cursor-pointer ${editingStepId===s.id ? 'border-blue-500 bg-blue-50' : 'hover:border-slate-300'}`} onClick={() => editStep(s)}><div className="flex flex-col gap-1 justify-center"><button onClick={(e)=>{e.stopPropagation();moveStep(i,'up')}} disabled={i===0} className="text-slate-300 hover:text-slate-600"><ArrowUp className="w-4 h-4"/></button><span className="text-xs font-bold text-slate-400 text-center">{i+1}</span><button onClick={(e)=>{e.stopPropagation();moveStep(i,'down')}} disabled={i===steps.length-1} className="text-slate-300 hover:text-slate-600"><ArrowDown className="w-4 h-4"/></button></div><div className="flex-1 min-w-0"><div className="font-bold text-sm truncate">{s.title}</div><p className="text-xs text-slate-500 truncate">{s.description}</p></div><button onClick={(e)=>{e.stopPropagation();deleteStep(s.id)}} className="text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4"/></button></div>))}</div>
+        </div>
+        <div className="w-2/3 p-6 bg-slate-50 overflow-y-auto flex gap-6">
+          <div className="flex-1 space-y-4">
+            <div><label className="block text-xs font-bold text-slate-500 mb-1">工程タイトル</label><input value={title} onChange={e => setTitle(e.target.value)} className="w-full p-2 border rounded"/></div>
+            <div className="flex gap-4"><div className="flex-1"><label className="block text-xs font-bold text-slate-500 mb-1">タイプ</label><div className="flex gap-1">{['normal', 'important', 'danger'].map(t => (<button key={t} onClick={() => setType(t)} className={`flex-1 py-1.5 text-xs rounded border ${type===t ? 'bg-slate-800 text-white' : 'bg-white text-slate-500'}`}>{t}</button>))}</div></div><div className="w-24"><label className="block text-xs font-bold text-slate-500 mb-1">目標(秒)</label><input type="number" value={targetTime} onChange={e => setTargetTime(Number(e.target.value))} className="w-full p-2 border rounded text-right"/></div></div>
+            <div className="relative"><label className="block text-xs font-bold text-slate-500 mb-1">詳細・注意事項</label><textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full p-2 border rounded h-32"/><button onClick={toggleListening} className="absolute bottom-2 right-2 p-1.5 bg-slate-100 rounded-full hover:bg-slate-200"><Mic className="w-4 h-4 text-slate-600"/></button></div>
+            <div className="pt-2 flex gap-2">{editingStepId && <button onClick={resetInput} className="flex-1 py-2 bg-slate-200 text-slate-600 rounded font-bold">キャンセル</button>}<button onClick={addStep} className="flex-1 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">{editingStepId ? '更新' : 'リストに追加'}</button></div>
+          </div>
+          <div className="w-64 flex-none">
+             <label className="block text-xs font-bold text-slate-500 mb-1">画像</label>
+             <div className="border-2 border-dashed h-48 rounded bg-white relative flex items-center justify-center overflow-hidden mb-2">
+               {images.length > 0 ? (<div className="w-full h-full relative group"><img src={images[activeImgIdx]} className="w-full h-full object-contain" /><div className="absolute top-2 left-2"><button onClick={()=>setIsDrawingMode(true)} className="bg-white/90 p-1.5 rounded shadow text-xs flex gap-1 items-center font-bold text-slate-700"><Brush className="w-3 h-3"/> 編集</button></div></div>) : (<div onClick={()=>fileInputRef.current?.click()} className="text-center text-slate-400 cursor-pointer hover:text-blue-500"><Camera className="w-8 h-8 mx-auto mb-1"/><span className="text-xs">追加</span></div>)}
+               <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload}/>
+             </div>
+             {images.length > 0 && (<div className="flex gap-2 overflow-x-auto pb-1 mb-2">{images.map((img, i) => (<div key={i} onClick={()=>setActiveImgIdx(i)} className={`w-12 h-12 flex-none border rounded overflow-hidden cursor-pointer ${activeImgIdx===i?'ring-2 ring-blue-500':''}`}><img src={img} className="w-full h-full object-cover"/></div>))}</div>)}
+             <div className="mt-2 border-t pt-2"><label className="block text-xs font-bold text-slate-500 mb-1">PDF資料</label><button onClick={()=>pdfInputRef.current?.click()} className={`w-full py-2 border rounded text-xs flex items-center justify-center gap-2 ${pdfData ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-slate-50 text-slate-500'}`}><FileText className="w-4 h-4"/> {pdfData ? '添付済' : '選択'}</button><input type="file" ref={pdfInputRef} className="hidden" accept="application/pdf" onChange={handlePdfUpload}/></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WorkExecutionModal = ({ lot, onClose, onSave, onFinish }) => {
+  const [executionType, setExecutionType] = useState('initial');
+  const [currentStepIdx, setCurrentStepIdx] = useState(lot.currentStepIndex || 0);
+  const [localSteps, setLocalSteps] = useState(lot.steps || []);
+  const [tasks, setTasks] = useState(lot.tasks || {});
+  const [stepTimes, setStepTimes] = useState(lot.stepTimes || {});
+  
+  // Timer for Sequential Mode
+  const [startTime, setStartTime] = useState(lot.workStartTime || null);
+  const [elapsed, setElapsed] = useState(0);
+  const [isTimerRunning, setIsTimerRunning] = useState(lot.status === 'processing');
+  
+  // Batch processing state for custom mode
+  const [batchStartTimes, setBatchStartTimes] = useState({});
+  
+  // Interruptions (Defects/Monitoring)
+  const [interruptions, setInterruptions] = useState(lot.interruptions || []);
+  const [showDefectModal, setShowDefectModal] = useState(false);
+  const [defectLabel, setDefectLabel] = useState('');
+
+  // Confirmation state
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  const [showPdf, setShowPdf] = useState(false);
+  const [activeCustomTaskKey, setActiveCustomTaskKey] = useState(null);
+
+  // Initialize
+  useEffect(() => {
+    if (lot.tasks && Object.keys(lot.tasks).length > 0) {
+       setExecutionType('custom');
+    }
+    setElapsed(lot.totalWorkTime || 0);
+  }, []);
+
+  // Timer Tick (Global & Interruption)
+  useEffect(() => {
+    let interval;
+    const now = Date.now();
+    
+    if ((executionType === 'sequential' && isTimerRunning) || executionType === 'custom' || interruptions.some(i => i.status === 'active')) {
+       if (!startTime) setStartTime(now);
+       interval = setInterval(() => {
+         const currentNow = Date.now();
+         
+         // Main Timer (Sequential)
+         if (executionType === 'sequential' && isTimerRunning) {
+             const start = startTime || currentNow;
+             setElapsed((lot.totalWorkTime || 0) + (currentNow - start));
+         }
+
+         // Update Interruption durations
+         setInterruptions(prev => prev.map(i => {
+             if (i.status === 'active') {
+                 return { ...i, duration: Math.floor((currentNow - i.startTime) / 1000) };
+             }
+             return i;
+         }));
+
+         // Custom Tasks updates handled by batch/task start times diff (reactive)
+         // But for display we can trigger re-render
+         setTasks({...tasks});
+       }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isTimerRunning, executionType, tasks, interruptions]); 
+
+  // --- Defect & Monitor Logic ---
+  const startInterruption = (type, label) => {
+      const newInt = {
+          id: generateId(),
+          type,
+          label,
+          startTime: Date.now(),
+          duration: 0,
+          status: 'active'
+      };
+      const updated = [...interruptions, newInt];
+      setInterruptions(updated);
+      onSave({ interruptions: updated });
+      if (type === 'defect') setShowDefectModal(false);
+  };
+
+  const stopInterruption = (id) => {
+      const updated = interruptions.map(i => i.id === id ? { ...i, status: 'completed' } : i);
+      setInterruptions(updated);
+      onSave({ interruptions: updated });
+  };
+
+  // --- Sequential Handlers ---
+  const currentStep = localSteps[currentStepIdx];
+  const handleStart = () => { setIsTimerRunning(true); setStartTime(Date.now()); onSave({ status: 'processing', workStartTime: Date.now() }); };
+  const handlePause = () => { setIsTimerRunning(false); onSave({ status: 'paused', totalWorkTime: elapsed, workStartTime: null }); };
+  const handleNext = () => {
+    const prevTime = currentStepIdx > 0 ? (stepTimes[localSteps[currentStepIdx-1].id] || 0) : 0;
+    const currentStepDuration = elapsed - prevTime; 
+    
+    const newStepTimes = { ...stepTimes, [currentStep.id]: currentStepDuration };
+    setStepTimes(newStepTimes);
+
+    if (currentStepIdx < localSteps.length - 1) {
+      setCurrentStepIdx(prev => prev + 1);
+      onSave({ currentStepIndex: currentStepIdx + 1, totalWorkTime: elapsed, stepTimes: newStepTimes });
+    } else {
+      handleCompleteTrigger();
+    }
+  };
+  
+  const handleCompleteTrigger = () => {
+      setIsTimerRunning(false);
+      onSave({ status: 'paused', totalWorkTime: elapsed, workStartTime: null, stepTimes }); 
+      setIsConfirming(true);
+  };
+
+  const finalizeComplete = () => {
+      onSave({ status: 'completed', location: 'completed', totalWorkTime: elapsed, workStartTime: null, currentStepIndex: localSteps.length, stepTimes, tasks, interruptions }); 
+      onFinish();
+  };
+
+  const handleNG = () => { setIsTimerRunning(false); onSave({ status: 'error', totalWorkTime: elapsed, workStartTime: null }); onClose(); };
+
+  // --- Custom Mode Handlers ---
+  const isManualTaskRunning = useMemo(() => {
+    return Object.keys(tasks).some(key => {
+       const [stepIdx] = key.split('-').map(Number);
+       const step = localSteps[stepIdx];
+       return step && !step.title.includes('自動') && tasks[key].status === 'processing';
+    });
+  }, [tasks, localSteps]);
+
+  const toggleTask = (stepIdx, unitIdx) => {
+    const key = `${stepIdx}-${unitIdx}`;
+    const newTasks = { ...tasks };
+    const currentTask = tasks[key] || { status: 'waiting', duration: 0, startTime: null };
+
+    if (currentTask.status === 'waiting' || currentTask.status === 'paused') {
+      newTasks[key] = { ...currentTask, status: 'processing', startTime: Date.now() };
+      setActiveCustomTaskKey(key);
+    } else if (currentTask.status === 'processing') {
+      const now = Date.now();
+      const sessionDuration = currentTask.startTime ? Math.floor((now - currentTask.startTime) / 1000) : 0;
+      newTasks[key] = { ...currentTask, status: 'completed', duration: currentTask.duration + sessionDuration, startTime: null };
+    }
+    setTasks(newTasks);
+    onSave({ tasks: newTasks, status: 'processing' });
+  };
+
+  const toggleBatch = (stepIdx) => {
+    const isBatchStarted = !!batchStartTimes[stepIdx];
+    const newTasks = { ...tasks };
+    const now = Date.now();
+    
+    if (!isBatchStarted) {
+        Array.from({ length: lot.quantity }).forEach((_, uIdx) => {
+            const key = `${stepIdx}-${uIdx}`;
+            const currentTask = newTasks[key] || { status: 'waiting', duration: 0, startTime: null };
+            if (currentTask.status !== 'completed') {
+                newTasks[key] = { ...currentTask, status: 'processing', startTime: now };
+            }
+        });
+        setBatchStartTimes({ ...batchStartTimes, [stepIdx]: now });
+    } else {
+        const startTime = batchStartTimes[stepIdx];
+        const totalDuration = Math.floor((now - startTime) / 1000);
+        let processedCount = 0;
+        Array.from({ length: lot.quantity }).forEach((_, uIdx) => {
+            const key = `${stepIdx}-${uIdx}`;
+            if (newTasks[key]?.status === 'processing' && newTasks[key]?.startTime === startTime) {
+                processedCount++;
+            }
+        });
+        const perUnitTime = processedCount > 0 ? Math.floor(totalDuration / processedCount) : 0;
+
+        Array.from({ length: lot.quantity }).forEach((_, uIdx) => {
+            const key = `${stepIdx}-${uIdx}`;
+            const currentTask = newTasks[key];
+            if (currentTask && currentTask.status === 'processing') {
+                newTasks[key] = { ...currentTask, status: 'completed', duration: currentTask.duration + perUnitTime, startTime: null };
+            }
+        });
+        const newBatchStartTimes = { ...batchStartTimes };
+        delete newBatchStartTimes[stepIdx];
+        setBatchStartTimes(newBatchStartTimes);
+    }
+    setTasks(newTasks);
+    onSave({ tasks: newTasks, status: 'processing' });
+  };
+  
+  const getTaskStatusColor = (status) => {
+    switch(status) {
+      case 'processing': return 'bg-blue-600 text-white animate-pulse';
+      case 'completed': return 'bg-emerald-500 text-white';
+      case 'paused': return 'bg-amber-100 text-amber-700';
+      default: return 'bg-slate-100 text-slate-500 hover:bg-slate-200';
+    }
+  };
+
+  // --- Confirmation Screen ---
+  if (isConfirming) {
+      const summary = localSteps.map((step, idx) => {
+          let incompleteCount = 0;
+          let duration = 0;
+          if (executionType === 'sequential') {
+              duration = (stepTimes[step.id] || 0) / 1000;
+              if (idx >= currentStepIdx && idx !== localSteps.length) incompleteCount = lot.quantity; 
+          } else {
+              let completeCount = 0;
+              let totalDur = 0;
+              Array.from({length: lot.quantity}).forEach((_, uIdx) => {
+                  const t = tasks[`${idx}-${uIdx}`];
+                  if (t?.status === 'completed') { completeCount++; totalDur += t.duration; }
+              });
+              incompleteCount = lot.quantity - completeCount;
+              duration = completeCount > 0 ? totalDur / completeCount : 0;
+          }
+          return { ...step, duration, incompleteCount };
+      });
+      const totalIncomplete = summary.reduce((a,b) => a + b.incompleteCount, 0);
+
+      return (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-6 border-b border-slate-200 bg-slate-50">
+                    <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
+                        <CheckCircle2 className="w-6 h-6 text-emerald-600"/> 作業完了確認
+                    </h2>
+                    <p className="text-slate-500 text-sm mt-1">作業を完了し、次工程（完了済エリア）へ移動しますか？</p>
+                </div>
+                <div className="flex-1 overflow-y-auto p-6">
+                    {totalIncomplete > 0 && (
+                        <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-lg flex gap-3 items-start animate-pulse">
+                            <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0"/>
+                            <div><div className="font-bold text-amber-800">未完了の作業があります</div></div>
+                        </div>
+                    )}
+                    <div className="space-y-3">{summary.map((s, i) => (
+                        <div key={s.id} className="flex items-center justify-between p-3 border rounded-lg bg-white">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${s.incompleteCount > 0 ? 'bg-slate-200 text-slate-500' : 'bg-emerald-100 text-emerald-600'}`}>{i+1}</div>
+                                <div><div className="font-bold text-slate-800">{s.title}</div><div className="text-xs text-slate-500">平均: {Math.round(s.duration)}s</div></div>
+                            </div>
+                            <div>{s.incompleteCount > 0 ? <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded">未完了 ({s.incompleteCount})</span> : <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded flex items-center gap-1"><Check className="w-3 h-3"/> 完了</span>}</div>
+                        </div>
+                    ))}</div>
+                </div>
+                <div className="p-4 border-t bg-slate-50 flex justify-end gap-3">
+                    <button onClick={() => setIsConfirming(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg font-bold">戻る</button>
+                    <button onClick={finalizeComplete} className="px-6 py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg font-bold shadow-lg">確定</button>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
+  if (executionType === 'initial') {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full text-center">
+           <h2 className="text-xl font-bold mb-6">作業モードを選択してください</h2>
+           <div className="flex flex-col gap-4">
+             <button onClick={() => setExecutionType('sequential')} className="p-4 bg-blue-50 border-2 border-blue-200 rounded-xl hover:bg-blue-100 transition-colors text-left group">
+               <div className="font-bold text-blue-800 text-lg group-hover:underline">順序通りに進める (通常)</div>
+               <div className="text-sm text-slate-600 mt-1">手順書に従って、Step 1から順番に作業を行います。</div>
+             </button>
+             <button onClick={() => setExecutionType('custom')} className="p-4 bg-emerald-50 border-2 border-emerald-200 rounded-xl hover:bg-emerald-100 transition-colors text-left group">
+               <div className="font-bold text-emerald-800 text-lg group-hover:underline">自由に工程を選ぶ (カスタム)</div>
+               <div className="text-sm text-slate-600 mt-1">好きな工程を選んで作業できます。台数分のボタンが配置されます。</div>
+             </button>
+           </div>
+           <button onClick={onClose} className="mt-6 text-slate-400 hover:text-slate-600">キャンセル</button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Custom Mode Variables Definition (Fixed) ---
+  const isCustom = executionType === 'custom';
+  let displayStepIdx = 0;
+  if (activeCustomTaskKey) {
+     displayStepIdx = parseInt(activeCustomTaskKey.split('-')[0]);
+  }
+  // Safeguard against empty steps or invalid index
+  const displayStep = localSteps[displayStepIdx] || localSteps[0] || { title: 'No Step', description: '', images: [] };
+
+  // --- Custom Mode with Monitoring & Defects ---
+  if (isCustom) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+        {showDefectModal && (
+            <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+                <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                    <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-rose-600"><AlertCircle className="w-5 h-5"/> 不具合報告</h3>
+                    <textarea className="w-full border rounded p-2 mb-4" placeholder="不具合の内容を入力..." value={defectLabel} onChange={e=>setDefectLabel(e.target.value)}/>
+                    <div className="flex justify-end gap-2">
+                        <button onClick={()=>setShowDefectModal(false)} className="px-4 py-2 text-slate-500">キャンセル</button>
+                        <button onClick={()=>startInterruption('defect', defectLabel)} className="px-4 py-2 bg-rose-600 text-white rounded font-bold">対応開始</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        <div className="bg-white w-full max-w-6xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
+          <div className="bg-slate-800 text-white p-4 flex justify-between items-center shrink-0">
+             <div><h2 className="text-lg font-bold flex items-center gap-2"><span className="bg-emerald-600 px-2 py-0.5 rounded text-xs">カスタム実行</span>{lot.model} <span className="font-mono opacity-70">#{lot.serialNo}</span> ({lot.quantity}台)</h2></div>
+             <div className="flex gap-4">
+                 <button onClick={()=>setShowDefectModal(true)} className="px-3 py-2 bg-rose-600 hover:bg-rose-700 rounded font-bold text-sm flex items-center gap-1"><AlertTriangle className="w-4 h-4"/> 不具合報告</button>
+                 <button onClick={handleCompleteTrigger} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded font-bold text-sm">全作業完了</button>
+                 <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full"><X className="w-6 h-6"/></button>
+             </div>
+          </div>
+          
+          <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 overflow-auto p-6 bg-slate-50 pb-32">
+               <div className="grid gap-6">
+                 {localSteps.map((step, sIdx) => {
+                   const isAuto = step.title.includes('自動');
+                   const isBatch = !!batchStartTimes[sIdx];
+                   const isMonitoring = interruptions.some(i => i.type === 'monitoring' && i.status === 'active' && i.label === step.title);
+                   
+                   return (
+                     <div key={step.id} className={`bg-white rounded-xl shadow-sm border p-4 ${sIdx === displayStepIdx ? 'ring-2 ring-blue-500' : ''}`}>
+                        <div className="flex justify-between items-center mb-3">
+                           <div className="flex items-center gap-2">
+                             <span className="bg-slate-100 text-slate-500 font-bold px-2 py-1 rounded text-xs">Step {sIdx+1}</span>
+                             <span className="font-bold text-lg text-slate-800">{step.title}</span>
+                             {isAuto && <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1"><Bot className="w-3 h-3"/> 自動</span>}
+                           </div>
+                           <div className="flex gap-2">
+                               {isAuto && (
+                                   <button onClick={() => isMonitoring ? stopInterruption(interruptions.find(i=>i.label===step.title && i.status==='active')?.id) : startInterruption('monitoring', step.title)} className={`px-3 py-1 text-xs font-bold rounded border flex items-center gap-1 ${isMonitoring ? 'bg-indigo-600 text-white animate-pulse' : 'bg-white text-slate-600'}`}>
+                                       <Eye className="w-3 h-3"/> {isMonitoring ? '監視中...' : '監視'}
+                                   </button>
+                               )}
+                               <button 
+                                 onClick={() => toggleBatch(sIdx)}
+                                 className={`px-3 py-1 text-xs font-bold rounded border flex items-center gap-1 transition-colors ${isBatch ? 'bg-orange-500 text-white border-orange-600 animate-pulse' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                               >
+                                 {isBatch ? <><StopCircle className="w-3 h-3"/> まとめて完了</> : <><PlayCircle className="w-3 h-3"/> まとめて開始</>}
+                               </button>
+                               <button onClick={() => setActiveCustomTaskKey(`${sIdx}-0`)} className="text-xs text-blue-600 underline">詳細を表示</button>
+                           </div>
+                        </div>
+                        <div className="grid grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-2">
+                           {Array.from({ length: lot.quantity }).map((_, uIdx) => {
+                             const key = `${sIdx}-${uIdx}`;
+                             const task = tasks[key] || { status: 'waiting', duration: 0 };
+                             return (
+                               <button key={uIdx} onClick={() => toggleTask(sIdx, uIdx)} className={`h-16 rounded-lg flex flex-col items-center justify-center border transition-all relative ${getTaskStatusColor(task.status)} ${!isAuto && isManualTaskRunning && task.status === 'waiting' && !isBatch ? 'opacity-30 cursor-not-allowed' : ''}`} disabled={!isAuto && isManualTaskRunning && task.status === 'waiting' && !isBatch}>
+                                 <span className="text-xs font-bold">#{uIdx+1}</span>
+                                 <span className="text-[10px] font-mono mt-1">{formatTime(task.duration)}</span>
+                                 {task.status === 'processing' && <span className="absolute top-1 right-1 w-2 h-2 bg-white rounded-full animate-ping"/>}
+                               </button>
+                             );
+                           })}
+                        </div>
+                     </div>
+                   );
+                 })}
+               </div>
+            </div>
+            
+            {/* Right Panel: Step Detail & PDF */}
+            <div className="w-96 bg-white border-l border-slate-200 flex flex-col p-6 overflow-y-auto shrink-0">
+               <h3 className="font-bold text-slate-800 text-lg mb-4 border-b pb-2">工程詳細</h3>
+               <div className="bg-slate-100 rounded-xl overflow-hidden mb-4 border border-slate-200 aspect-video flex items-center justify-center">
+                  {displayStep.images && displayStep.images.length > 0 ? ( <img src={displayStep.images[0]} className="w-full h-full object-contain" /> ) : ( <div className="text-slate-300 flex flex-col items-center"><Camera className="w-12 h-12 mb-2"/><span>画像なし</span></div> )}
+               </div>
+               <div className="space-y-4">
+                  <div><label className="text-xs font-bold text-slate-500">作業名</label><div className="text-base font-bold text-slate-800">{displayStep.title}</div></div>
+                  <div><label className="text-xs font-bold text-slate-500">内容・注意点</label><div className="text-sm text-slate-600 bg-slate-50 p-3 rounded-lg whitespace-pre-wrap">{displayStep.description}</div></div>
+                  {displayStep.pdfData && ( <button onClick={() => setShowPdf(true)} className="w-full py-2 border border-orange-200 bg-orange-50 text-orange-700 rounded-lg flex items-center justify-center gap-2 text-sm font-bold hover:bg-orange-100"><FileText className="w-4 h-4"/> PDF資料を確認</button> )}
+               </div>
+            </div>
+          </div>
+          
+          {/* Active Interruptions Footer */}
+          {interruptions.some(i => i.status === 'active') && (
+              <div className="absolute bottom-0 left-0 right-0 bg-slate-900/90 text-white p-3 flex items-center gap-4 z-40 backdrop-blur">
+                  <span className="text-xs font-bold bg-white/20 px-2 py-1 rounded">進行中の割り込み</span>
+                  <div className="flex-1 flex gap-3 overflow-x-auto">
+                      {interruptions.filter(i => i.status === 'active').map(i => (
+                          <div key={i.id} className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-bold ${i.type === 'defect' ? 'bg-rose-600' : 'bg-indigo-600'}`}>
+                              {i.type === 'defect' ? <AlertTriangle className="w-3 h-3"/> : <Eye className="w-3 h-3"/>}
+                              {i.label} <span className="font-mono">{formatTime(i.duration)}</span>
+                              <button onClick={() => stopInterruption(i.id)} className="ml-2 hover:text-slate-200"><CheckCircle2 className="w-4 h-4"/></button>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // --- Sequential Mode UI (Same as before) ---
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/90 flex items-center justify-center p-4">
+      {showPdf && currentStep.pdfData ? (
+        <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col p-4">
+          <div className="flex justify-between items-center text-white mb-2"><span className="font-bold">参考資料</span><button onClick={()=>setShowPdf(false)}><X className="w-8 h-8"/></button></div>
+          <iframe src={currentStep.pdfData} className="flex-1 bg-white rounded-lg"/>
+        </div>
+      ) : null}
+
+      <div className="bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="bg-slate-800 text-white p-4 flex justify-between items-center shrink-0">
+          <div><h2 className="text-lg font-bold flex items-center gap-2"><span className="bg-blue-600 px-2 py-0.5 rounded text-xs">順序実行</span>{lot.model} <span className="font-mono opacity-70">#{lot.serialNo}</span></h2><p className="text-xs text-slate-400 mt-1">工程 {currentStepIdx + 1} / {localSteps.length}: {currentStep.title}</p></div><button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full"><X className="w-6 h-6"/></button>
+        </div>
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 bg-slate-100 p-4 flex flex-col relative">
+             <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-center overflow-hidden relative">
+                {currentStep.images && currentStep.images.length > 0 ? ( <img src={currentStep.images[0]} className="w-full h-full object-contain" /> ) : ( <div className="text-slate-300 flex flex-col items-center"><Camera className="w-16 h-16 mb-2"/><span>画像なし</span></div> )}
+                {currentStep.type === 'danger' && ( <div className="absolute top-4 right-4 bg-red-600 text-white px-4 py-2 rounded-full font-bold shadow-lg animate-pulse flex items-center gap-2"><AlertOctagon className="w-5 h-5"/> 危険</div> )}
+                {currentStep.type === 'important' && ( <div className="absolute top-4 right-4 bg-amber-500 text-white px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2"><AlertTriangle className="w-5 h-5"/> 重要</div> )}
+             </div>
+             {currentStep.pdfData && ( <button onClick={() => setShowPdf(true)} className="mt-2 w-full bg-orange-50 text-orange-700 border border-orange-200 py-2 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-orange-100"><FileText className="w-4 h-4"/> PDF資料を開く</button> )}
+             <div className="mt-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><h3 className="text-sm font-bold text-slate-500 mb-1">作業内容 / 注意事項</h3><p className="text-lg text-slate-800 whitespace-pre-wrap">{currentStep.description}</p></div>
+          </div>
+          <div className="w-80 bg-white border-l border-slate-200 flex flex-col p-6 shrink-0">
+             <div className="text-center mb-8"><div className="text-sm text-slate-500 mb-1">経過時間</div><div className={`text-4xl font-mono font-black ${currentStep.targetTime && elapsed/1000 > currentStep.targetTime ? 'text-rose-500' : 'text-slate-800'}`}>{formatTime(Math.floor(elapsed / 1000))}</div>{currentStep.targetTime > 0 && (<div className="text-xs text-slate-400 mt-1">目標: {formatTime(currentStep.targetTime)}</div>)}</div>
+             <div className="flex-1 flex flex-col gap-4 justify-center">
+               {!isTimerRunning ? ( <button onClick={handleStart} className="w-full py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xl shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-105"><Play className="w-6 h-6 fill-current"/> 作業開始</button> ) : ( <><button onClick={handleNext} className="w-full py-6 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xl shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-105"><CheckCircle2 className="w-6 h-6"/> {currentStepIdx < localSteps.length - 1 ? '次へ' : '作業完了'}</button><button onClick={handleCompleteTrigger} className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold flex items-center justify-center gap-2"><Check className="w-5 h-5"/> 全作業完了</button></> )}
+             </div>
+             <div className="mt-8 border-t pt-6"><button onClick={handleNG} className="w-full py-3 border-2 border-rose-100 text-rose-500 hover:bg-rose-50 rounded-xl font-bold flex items-center justify-center gap-2"><AlertOctagon className="w-5 h-5"/> 不適合報告 (NG)</button></div>
+          </div>
+        </div>
+        <div className="h-2 bg-slate-100"><div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${((currentStepIdx + (lot.status==='completed'?1:0)) / localSteps.length) * 100}%` }} /></div>
+      </div>
+    </div>
+  );
+};
+
+// --- View Definitions (DashboardView Defined Here) ---
+
+const DashboardView = ({ onSetMode, lots, workers, handleMoveLot, saveData, setDraggedLotId, draggedLotId, setExecutionLotId, settings, templates, onEditLot, onDeleteLot, handleImageUpload, saveSettings, mapZones }) => (
+  <div className="grid grid-cols-12 gap-4 h-full">
+    <div className="col-span-3 flex flex-col gap-4">
+      <ZoneList id="arrival" title="入荷待ち" icon={Package} color="bg-white" border="border-slate-300" 
+        onClickHeader={() => onSetMode('arrival-planning')} 
+        onDropLot={(id) => handleMoveLot(id, 'arrival')}>
+        {lots.filter(l => l.location === 'arrival').map(lot => <LotCard key={lot.id} lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} onEdit={onEditLot} onDelete={onDeleteLot} 
+          variant='dashboard-arrival' 
+        />)}
+      </ZoneList>
+      <ZoneList id="buffer" title="作業予定" icon={Calendar} color="bg-amber-50" border="border-amber-200" 
+        onClickHeader={() => onSetMode('planning-execution')}
+        onDropLot={(id) => handleMoveLot(id, 'buffer')}>
+        {workers.map(worker => (
+          <WorkerSummaryCard key={worker.id} worker={worker} lots={lots} />
+        ))}
+        {workers.length === 0 && <div className="text-center text-slate-400 p-4">作業者が登録されていません</div>}
+      </ZoneList>
+    </div>
+    <div className="col-span-6 flex flex-col">
+      <div className="flex-1 h-full" onClick={() => onSetMode('map-only')}>
+        <InteractiveMap 
+          lots={lots} workers={workers} templates={templates} 
+          handleMoveLot={handleMoveLot} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} 
+          onEditLot={onEditLot} onDeleteLot={onDeleteLot} setExecutionLotId={setExecutionLotId} 
+          settings={settings} handleImageUpload={handleImageUpload} saveSettings={saveSettings} mapZones={mapZones} 
+          isDashboard={true} 
+        />
+      </div>
+    </div>
+    <div className="col-span-3 flex flex-col">
+       <ZoneList id="complete" title="完了済み" icon={CheckCircle2} color="bg-emerald-50" border="border-emerald-200" 
+         onClickHeader={() => onSetMode('completed-list')}
+         onDropLot={(id) => handleMoveLot(id, 'completed')}>
+         {lots.filter(l => l.location === 'completed').map(lot => <LotCard key={lot.id} lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} onEdit={onEditLot} onDelete={onDeleteLot} minimal={false}/>)}
+       </ZoneList>
+    </div>
+  </div>
+);
+
+const ArrivalPlanningView = ({ onBack, lots, workers, templates, handleMoveLot, saveData, setDraggedLotId, draggedLotId, handleAddWorker, onEditLot, onDeleteLot, mapZones }) => {
+  const calculateWorkerLoad = (workerId) => {
+    const workerLots = lots.filter(l => l.location === 'planned' && l.workerId === workerId && l.status !== 'completed');
+    const totalSeconds = workerLots.reduce((acc, lot) => acc + calculateLotEstimatedTime(lot), 0);
+    return formatTime(totalSeconds);
+  };
+
+  return (
+    <div className="grid grid-cols-12 gap-6 h-full">
+      <div className="col-span-3 flex flex-col h-full border-r pr-4 min-h-0">
+        <button onClick={onBack} className="mb-2 text-slate-500 hover:text-slate-800 flex items-center gap-1"><ArrowRight className="w-4 h-4 rotate-180"/> 戻る</button>
+        <ZoneList id="arrival" title="入荷待ちリスト" icon={Package} color="bg-white" border="border-slate-300" onDropLot={(id) => handleMoveLot(id, 'arrival')} active={true}>
+          {lots.filter(l => l.location === 'arrival').map(lot => <LotCard key={lot.id} lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} onEdit={onEditLot} onDelete={onDeleteLot} minimal={false}/>)}
+        </ZoneList>
+      </div>
+      <div className="col-span-9 flex flex-col h-full">
+        <div className="bg-amber-50 rounded-xl border-2 border-amber-200 h-full flex flex-col shadow-xl">
+          <div className="p-3 border-b border-amber-200 bg-amber-100/50 flex justify-between items-center rounded-t-xl">
+            <h2 className="font-bold text-amber-900 flex items-center gap-2"><Calendar className="w-5 h-5"/> 作業予定 (作業者割当)</h2>
+            <button onClick={handleAddWorker} className="text-xs bg-white border border-amber-300 text-amber-700 px-2 py-1 rounded hover:bg-amber-50">+ 作業者追加</button>
+          </div>
+          <div className="flex-1 overflow-x-auto p-4 flex gap-4">
+            <div className="min-w-[200px] flex-1 border border-amber-200 bg-white rounded-lg p-3 flex flex-col" onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>{e.preventDefault(); const id=e.dataTransfer.getData('lotId'); if(id) handleMoveLot(id, 'planned', null);}}>
+              <div className="text-xs font-bold text-slate-400 mb-2 border-b pb-1">未割当</div>
+              <div className="flex-1 overflow-y-auto space-y-2">{lots.filter(l => l.location === 'planned' && !l.workerId).map(lot => <LotCard key={lot.id} lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} onEdit={onEditLot} onDelete={onDeleteLot} minimal={false}/>)}</div>
+            </div>
+            {workers.map(w => (
+              <div key={w.id} className="min-w-[200px] flex-1 border border-blue-100 bg-blue-50/30 rounded-lg p-3 flex flex-col" onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>{e.preventDefault(); const id=e.dataTransfer.getData('lotId'); if(id) handleMoveLot(id, 'planned', w.id);}}>
+                <div className="text-sm font-bold text-blue-800 mb-2 flex items-center justify-between border-b pb-1">
+                  <div className="flex items-center gap-1"><User className="w-4 h-4"/> {w.name}</div>
+                  <div className="text-[10px] bg-blue-200 text-blue-800 px-1.5 rounded">{calculateWorkerLoad(w.id)}</div>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-2">{lots.filter(l => l.location === 'planned' && l.workerId === w.id).map(lot => <LotCard key={lot.id} lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} onEdit={onEditLot} onDelete={onDeleteLot} minimal={false}/>)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PlanningExecutionView = ({ onBack, workers, lots, templates, handleMoveLot, saveData, setDraggedLotId, draggedLotId, setSelectedWorker, handleImageUpload, settings, mapRef, handleDropOnMap, setExecutionLotId, onEditLot, onDeleteLot, saveSettings, mapZones }) => {
+  const [filterWorkerId, setFilterWorkerId] = useState(null);
+
+  return (
+    <div className="grid grid-cols-10 gap-4 h-full">
+      {/* Left: Planning (30% -> 3/10 cols) */}
+      <div className="col-span-3 flex flex-col h-full border-r pr-4 min-h-0">
+        <button onClick={onBack} className="mb-2 text-slate-500 hover:text-slate-800 flex items-center gap-1 shrink-0"><ArrowRight className="w-4 h-4 rotate-180"/> 戻る</button>
+        <div className="bg-amber-50 rounded-xl border-2 border-amber-200 h-full flex flex-col shadow-md overflow-hidden min-h-0">
+          <div className="p-3 border-b border-amber-200 bg-amber-100/50 flex justify-between items-center shrink-0">
+             <h2 className="font-bold text-amber-900 flex items-center gap-2"><Calendar className="w-5 h-5"/> 作業予定 (担当別)</h2>
+             {filterWorkerId && <button onClick={() => setFilterWorkerId(null)} className="text-xs bg-white px-2 py-1 rounded border shadow-sm flex items-center gap-1"><X className="w-3 h-3"/>解除</button>}
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+             {workers.map(w => {
+               if (filterWorkerId && filterWorkerId !== w.id) return null;
+               const workerLots = lots.filter(l => l.location === 'planned' && l.workerId === w.id);
+               return (
+                 <div key={w.id} className="bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col overflow-hidden shrink-0">
+                   <div 
+                     onClick={() => setFilterWorkerId(filterWorkerId === w.id ? null : w.id)}
+                     className={`bg-slate-50 px-3 py-2 font-bold text-slate-700 text-sm flex items-center justify-between border-b cursor-pointer hover:bg-slate-100 transition-colors ${filterWorkerId === w.id ? 'bg-blue-100 text-blue-800' : ''}`}
+                   >
+                     <div className="flex items-center gap-2"><User className="w-4 h-4"/> {w.name}</div>
+                     <span className="text-xs font-normal text-slate-500">({workerLots.length}件)</span>
+                   </div>
+                   <div className="p-2 space-y-2 min-h-[50px] bg-slate-50/50">
+                     {workerLots.map(lot => (
+                       <div key={lot.id} draggable onDragStart={(e)=>{e.dataTransfer.setData('lotId', lot.id); setDraggedLotId(lot.id);}}>
+                         <LotCard lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} onEdit={onEditLot} onDelete={onDeleteLot} minimal={false}/>
+                       </div>
+                     ))}
+                     {workerLots.length === 0 && <div className="text-center text-slate-300 text-xs py-2">予定なし</div>}
+                   </div>
+                 </div>
+               );
+             })}
+             {!filterWorkerId && lots.filter(l => l.location === 'planned' && !l.workerId).length > 0 && (
+               <div className="bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col overflow-hidden shrink-0">
+                 <div className="bg-slate-50 px-3 py-2 font-bold text-slate-400 text-xs border-b">未割当</div>
+                 <div className="p-2 space-y-2 min-h-[50px]">
+                   {lots.filter(l => l.location === 'planned' && !l.workerId).map(lot => (
+                     <div key={lot.id} draggable onDragStart={(e)=>{e.dataTransfer.setData('lotId', lot.id); setDraggedLotId(lot.id);}}>
+                       <LotCard lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} onEdit={onEditLot} onDelete={onDeleteLot} minimal={false}/>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+             )}
+          </div>
+        </div>
+      </div>
+      
+      {/* Right: Map (70%) - Full Height */}
+      <div className="col-span-7 flex flex-col h-full min-h-0">
+        <InteractiveMap 
+          lots={lots} workers={workers} templates={templates}
+          handleMoveLot={handleMoveLot} saveData={saveData} 
+          setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId}
+          onEditLot={onEditLot} onDeleteLot={onDeleteLot}
+          setExecutionLotId={setExecutionLotId}
+          settings={settings} handleImageUpload={handleImageUpload} saveSettings={saveSettings}
+          mapZones={mapZones}
+          isDashboard={false} // 詳細モードなので通常表示
+        />
+      </div>
+    </div>
+  );
+};
+
+// New View: Map Only
+const MapOnlyView = ({ onBack, lots, workers, templates, handleMoveLot, saveData, setDraggedLotId, draggedLotId, setExecutionLotId, settings, handleImageUpload, saveSettings, mapZones, onEditLot, onDeleteLot }) => (
+    <div className="h-full flex flex-col">
+       <div className="mb-2 flex items-center justify-between shrink-0">
+          <button onClick={onBack} className="text-slate-500 hover:text-slate-800 flex items-center gap-1"><ArrowRight className="w-4 h-4 rotate-180"/> 戻る</button>
+          <h2 className="font-bold text-blue-800 flex items-center gap-2"><MapIcon className="w-5 h-5"/> 作業エリア全体図</h2>
+       </div>
+       <InteractiveMap 
+          lots={lots} workers={workers} templates={templates} 
+          handleMoveLot={handleMoveLot} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} 
+          onEditLot={onEditLot} onDeleteLot={onDeleteLot} setExecutionLotId={setExecutionLotId} 
+          settings={settings} handleImageUpload={handleImageUpload} saveSettings={saveSettings} mapZones={mapZones} 
+          isDashboard={false} 
+        />
+    </div>
+);
+
+// Advanced Analysis View
+const AnalysisView = ({ lots, logs, workers }) => {
+  const [activeMode, setActiveMode] = useState('daily');
+  const [selectedModel, setSelectedModel] = useState('all');
+  const [targetTolerance, setTargetTolerance] = useState(20); // % for USL/LSL
+  const [dateRange, setDateRange] = useState('week');
+
+  // --- Step Analysis Data ---
+  const stepAnalysisData = useMemo(() => {
+    if (selectedModel === 'all') return null;
+
+    // Filter lots by model and completed status
+    const targetLots = lots.filter(l => l.model === selectedModel && (l.status === 'completed' || l.location === 'completed'));
+    if (targetLots.length === 0) return null;
+
+    // Use the steps definition from the first lot (assuming consistency for same model)
+    const steps = targetLots[0].steps || [];
+    
+    // Aggregators
+    const stepStats = steps.map((step, idx) => {
+        let totalDuration = 0;
+        let count = 0;
+        const durations = [];
+
+        targetLots.forEach(lot => {
+            // Check Custom Tasks
+            if (lot.tasks) {
+                // Sum all units for this step
+                let stepSum = 0;
+                let unitCount = 0;
+                Object.keys(lot.tasks).forEach(key => {
+                    if (key.startsWith(`${idx}-`) && lot.tasks[key].status === 'completed') {
+                        stepSum += lot.tasks[key].duration;
+                        unitCount++;
+                    }
+                });
+                if (unitCount > 0) {
+                    // Average per unit for this lot
+                    const avgPerUnit = stepSum / unitCount;
+                    totalDuration += avgPerUnit;
+                    durations.push(avgPerUnit);
+                    count++;
+                }
+            } 
+            // Check Sequential Step Times (if available)
+            else if (lot.stepTimes && lot.stepTimes[step.id]) {
+                const d = lot.stepTimes[step.id] / 1000; // ms to sec
+                totalDuration += d;
+                durations.push(d);
+                count++;
+            }
+        });
+
+        const avg = count > 0 ? totalDuration / count : 0;
+        return { 
+            stepName: step.title, 
+            avg, 
+            target: step.targetTime || 0,
+            count,
+            durations // for min/max/scatter later if needed
+        };
+    });
+
+    return stepStats;
+  }, [lots, selectedModel]);
+
+  const analysisData = useMemo(() => {
+    // Basic filtering
+    let filtered = lots.filter(l => l.status === 'completed' || l.location === 'completed');
+    if (selectedModel !== 'all') {
+        filtered = filtered.filter(l => l.model === selectedModel);
+    }
+    
+    // Group by Model for Distribution
+    const modelStats = {};
+    filtered.forEach(lot => {
+        if (!modelStats[lot.model]) modelStats[lot.model] = { times: [], target: 0 };
+        
+        const totalQty = lot.quantity || 1;
+        let unitTimes = [];
+
+        if (lot.tasks) {
+            // Custom Mode: Sum up durations for each unit across all steps
+            // structure: "stepIdx-unitIdx": { duration: ... }
+            const unitTotals = {};
+            Object.entries(lot.tasks).forEach(([key, task]) => {
+                if (task.status === 'completed') {
+                    const [_, uIdx] = key.split('-');
+                    unitTotals[uIdx] = (unitTotals[uIdx] || 0) + task.duration;
+                }
+            });
+            unitTimes = Object.values(unitTotals);
+        } else {
+            // Sequential Mode: Total time / Quantity (Distributed equally)
+            const totalTimeSec = (lot.totalWorkTime || 0) / 1000;
+            const avgTime = totalTimeSec / totalQty;
+            unitTimes = Array(totalQty).fill(avgTime);
+        }
+
+        // Add to stats
+        const target = calculateLotEstimatedTime(lot) / totalQty; // Target per unit
+        
+        if (target > 0) {
+            modelStats[lot.model].target = target;
+            modelStats[lot.model].times.push(...unitTimes);
+        }
+    });
+
+    // Calculate CPK & Histogram
+    const reports = Object.keys(modelStats).map(model => {
+        const { times, target } = modelStats[model];
+        if (times.length < 2) return null;
+
+        const avg = times.reduce((a,b)=>a+b,0) / times.length;
+        const variance = times.reduce((a,b)=>a + Math.pow(b-avg, 2), 0) / (times.length - 1);
+        const stdDev = Math.sqrt(variance);
+        
+        const usl = target * (1 + targetTolerance/100);
+        const lsl = target * (1 - targetTolerance/100);
+        
+        const cpu = (usl - avg) / (3 * stdDev);
+        const cpl = (avg - lsl) / (3 * stdDev);
+        const cpk = Math.min(cpu, cpl);
+
+        // Histogram buckets
+        const min = Math.min(...times);
+        const max = Math.max(...times);
+        const step = (max - min) / 10 || 1;
+        const buckets = Array(10).fill(0);
+        times.forEach(t => {
+            const idx = Math.min(Math.floor((t - min) / step), 9);
+            buckets[idx]++;
+        });
+
+        return { model, avg, stdDev, cpk, target, count: times.length, buckets, min, max, step };
+    }).filter(Boolean);
+
+    return reports;
+  }, [lots, selectedModel, targetTolerance]);
+
+  // Daily Worker Progress
+  const workerProgress = useMemo(() => {
+     return workers.map(w => {
+         const todayPlanned = lots.filter(l => l.location === 'planned' && l.workerId === w.id);
+         const todayDone = lots.filter(l => l.location === 'completed' && l.workerId === w.id); // In reality, filter by date
+         
+         const plannedSec = todayPlanned.reduce((a,l) => a + calculateLotEstimatedTime(l), 0);
+         const doneSec = todayDone.reduce((a,l) => a + calculateLotEstimatedTime(l), 0); // Use estimated for progress base
+         const actualDoneSec = todayDone.reduce((a,l) => a + (l.totalWorkTime||0)/1000, 0);
+
+         return { ...w, plannedSec, doneSec, actualDoneSec };
+     });
+  }, [lots, workers]);
+
+  return (
+    <div className="h-full flex flex-col bg-slate-50 overflow-hidden">
+       {/* Header Tabs */}
+       <div className="bg-white border-b px-6 py-4 flex items-center justify-between shrink-0">
+          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><BarChart3 className="w-6 h-6"/> 生産性分析</h2>
+          <div className="flex bg-slate-100 p-1 rounded-lg">
+             <button onClick={()=>setActiveMode('daily')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 ${activeMode==='daily' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><Activity className="w-4 h-4"/> 本日の生産状況</button>
+             <button onClick={()=>setActiveMode('process')} className={`px-4 py-2 rounded-md text-sm font-bold flex items-center gap-2 ${activeMode==='process' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><TrendingUp className="w-4 h-4"/> 工程改善分析</button>
+          </div>
+       </div>
+
+       <div className="flex-1 overflow-y-auto p-6">
+          {activeMode === 'daily' ? (
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {workerProgress.map(w => {
+                   const total = w.plannedSec + w.doneSec;
+                   const progress = total > 0 ? (w.doneSec / total) * 100 : 0;
+                   return (
+                     <div key={w.id} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                        <div className="flex items-center gap-3 mb-4">
+                           <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-xl">{w.name[0]}</div>
+                           <div>
+                              <div className="font-bold text-lg">{w.name}</div>
+                              <div className="text-xs text-slate-500">本日のタスク</div>
+                           </div>
+                           <div className="ml-auto text-right">
+                              <div className="text-2xl font-black text-slate-800">{Math.round(progress)}%</div>
+                           </div>
+                        </div>
+                        <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden mb-4">
+                           <div className="bg-blue-600 h-full transition-all duration-1000" style={{ width: `${progress}%` }}></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 text-center">
+                           <div className="bg-slate-50 p-2 rounded">
+                              <div className="text-xs text-slate-500 font-bold">完了(実績)</div>
+                              <div className="text-lg font-mono font-bold text-emerald-600">{formatTime(w.actualDoneSec)}</div>
+                           </div>
+                           <div className="bg-slate-50 p-2 rounded">
+                              <div className="text-xs text-slate-500 font-bold">残り予定</div>
+                              <div className="text-lg font-mono font-bold text-blue-600">{formatTime(w.plannedSec)}</div>
+                           </div>
+                        </div>
+                     </div>
+                   );
+                })}
+             </div>
+          ) : (
+             <div className="space-y-8">
+                {/* Controls */}
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end">
+                   <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">対象型式</label>
+                      <select value={selectedModel} onChange={e=>setSelectedModel(e.target.value)} className="border rounded p-2 text-sm min-w-[150px]">
+                         <option value="all">全型式</option>
+                         {Array.from(new Set(lots.map(l=>l.model))).map(m=><option key={m} value={m}>{m}</option>)}
+                      </select>
+                   </div>
+                   <div>
+                      <label className="block text-xs font-bold text-slate-500 mb-1">許容公差 (±%)</label>
+                      <input type="number" value={targetTolerance} onChange={e=>setTargetTolerance(Number(e.target.value))} className="border rounded p-2 text-sm w-24"/>
+                   </div>
+                </div>
+
+                {/* Reports */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                   {/* Overall Report */}
+                   {analysisData.map((report, idx) => (
+                      <div key={idx} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                         <div className="flex justify-between items-start mb-4">
+                            <div>
+                               <div className="text-sm font-bold text-slate-500">総合評価</div>
+                               <div className="text-xl font-black text-slate-800">{report.model}</div>
+                            </div>
+                            <div className="text-right">
+                               <div className="text-xs text-slate-400">サンプル数: {report.count}</div>
+                               <div className={`text-lg font-bold px-2 rounded ${report.cpk < 1.0 ? 'bg-rose-100 text-rose-600' : report.cpk < 1.33 ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                  Cpk: {report.cpk.toFixed(2)}
+                               </div>
+                            </div>
+                         </div>
+                         
+                         <div className="grid grid-cols-4 gap-2 mb-6 text-center text-sm">
+                            <div className="bg-slate-50 p-2 rounded"><div className="text-[10px] text-slate-400">平均時間</div><div className="font-bold">{report.avg.toFixed(1)}s</div></div>
+                            <div className="bg-slate-50 p-2 rounded"><div className="text-[10px] text-slate-400">目標時間</div><div className="font-bold">{report.target}s</div></div>
+                            <div className="bg-slate-50 p-2 rounded"><div className="text-[10px] text-slate-400">標準偏差(σ)</div><div className="font-bold">{report.stdDev.toFixed(1)}</div></div>
+                            <div className="bg-slate-50 p-2 rounded"><div className="text-[10px] text-slate-400">目標差</div><div className={`${report.avg > report.target ? 'text-rose-500':'text-emerald-500'} font-bold`}>{(report.avg - report.target).toFixed(1)}s</div></div>
+                         </div>
+
+                         {/* Histogram Visualization (Simple CSS Bars) */}
+                         <div className="h-40 flex items-end gap-1 border-b border-l border-slate-300 relative pt-4">
+                            {report.buckets.map((count, bIdx) => {
+                                const maxCount = Math.max(...report.buckets);
+                                const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                                return (
+                                   <div key={bIdx} className="flex-1 bg-blue-500/80 hover:bg-blue-600 transition-all relative group rounded-t-sm" style={{ height: `${height}%` }}>
+                                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-bold text-slate-600 opacity-0 group-hover:opacity-100">{count}</div>
+                                   </div>
+                                );
+                             })}
+                          </div>
+                          <div className="flex justify-between text-xs text-slate-400 mt-1">
+                             <span>{report.min.toFixed(0)}s</span>
+                             <span>{report.max.toFixed(0)}s</span>
+                          </div>
+                          
+                          {/* Improvement Suggestion */}
+                          <div className="mt-4 bg-yellow-50 border border-yellow-200 p-3 rounded-lg flex gap-3 items-start">
+                              <Target className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5"/>
+                              <div>
+                                 <div className="text-xs font-bold text-yellow-700">改善提案</div>
+                                 <div className="text-sm text-slate-700">
+                                    {report.avg > report.target * 1.1 
+                                      ? `目標時間(${report.target}s)に対して実績が大幅に遅れています。工程の見直しまたは目標時間の修正(推奨: ${Math.round(report.avg)}s)を検討してください。`
+                                      : report.stdDev > report.avg * 0.2
+                                      ? `作業時間のバラつきが大きいです(変動係数: ${(report.stdDev/report.avg*100).toFixed(0)}%)。作業手順の標準化が必要です。`
+                                      : `工程は安定しています。さらなる短縮が可能か検討してください。`
+                                    }
+                                 </div>
+                              </div>
+                          </div>
+                       </div>
+                    ))}
+ 
+                    {/* Step Breakdown Chart */}
+                    {stepAnalysisData && (
+                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 col-span-1 lg:col-span-2">
+                            <h3 className="font-bold text-lg mb-6 flex items-center gap-2"><Layers className="w-5 h-5"/> 工程別 所要時間分析 ({selectedModel})</h3>
+                            <div className="flex items-end gap-4 h-64 border-b border-slate-200 pb-2 overflow-x-auto">
+                                {stepAnalysisData.map((step, idx) => {
+                                    const maxTime = Math.max(...stepAnalysisData.map(s => Math.max(s.avg, s.target))) * 1.2;
+                                    const height = maxTime > 0 ? (step.avg / maxTime) * 100 : 0;
+                                    const targetHeight = maxTime > 0 ? (step.target / maxTime) * 100 : 0;
+                                    
+                                    return (
+                                        <div key={idx} className="flex-1 min-w-[80px] h-full flex flex-col justify-end relative group">
+                                            {/* Target Line Marker */}
+                                            <div className="absolute w-full border-t-2 border-dashed border-slate-300 z-10" style={{ bottom: `${targetHeight}%` }}></div>
+                                            
+                                            {/* Bar */}
+                                            <div 
+                                              className={`w-full rounded-t-md transition-all duration-500 relative ${step.avg > step.target ? 'bg-rose-400' : 'bg-blue-400'} hover:opacity-80`} 
+                                              style={{ height: `${height}%` }}
+                                            >
+                                                <div className="absolute -top-6 w-full text-center text-xs font-bold text-slate-700">{step.avg.toFixed(0)}s</div>
+                                            </div>
+                                            <div className="text-center mt-2">
+                                                <div className="text-xs font-bold text-slate-700 truncate px-1" title={step.stepName}>{step.stepName}</div>
+                                                <div className="text-[10px] text-slate-400">目標: {step.target}s</div>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                            <div className="mt-4 text-xs text-slate-500 flex gap-4">
+                                <div className="flex items-center gap-1"><div className="w-3 h-3 bg-blue-400 rounded"></div>目標内</div>
+                                <div className="flex items-center gap-1"><div className="w-3 h-3 bg-rose-400 rounded"></div>目標超過 (改善ポイント)</div>
+                                <div className="flex items-center gap-1"><div className="w-3 h-1 border-t-2 border-dashed border-slate-300"></div>目標時間</div>
+                            </div>
+                        </div>
+                    )}
+ 
+                    {analysisData.length === 0 && <div className="col-span-full text-center py-20 text-slate-400">分析可能なデータがありません</div>}
+                 </div>
+              </div>
+           )}
+        </div>
+     </div>
+   );
+ };
+ 
+ const CompletedListView = ({ onBack, lots, workers, templates, mapZones, saveData, onEditLot, onDeleteLot }) => {
+   const handleExportCSV = () => {
+     // 詳細な工程別データ出力
+     const headers = [
+         'ロットID', 'ワークNo.', '型式', '指図番号', '数量', '状態', '場所', '作業者', '入庫日時', '作業開始日時', '完了日時',
+         '工程名/イベント', '目標時間(秒)', '実績時間(秒)', '達成率(%)', '備考'
+     ];
+     
+     let rows = [];
+ 
+     const completedLots = lots.filter(l => l.location === 'completed' || l.status === 'completed');
+     
+     completedLots.forEach(lot => {
+         const zoneName = mapZones?.find(z => z.id === lot.mapZoneId)?.name || lot.location;
+         const workStartTimeStr = lot.workStartTime ? new Date(lot.workStartTime).toLocaleString() : '-';
+ 
+         const baseRow = [
+             lot.id, '', // Placeholder for Work No
+             lot.model, lot.orderNo, lot.quantity, lot.status, zoneName,
+             workers.find(w => w.id === lot.workerId)?.name || '未割当',
+             lot.entryAt ? formatDateSafe(lot.entryAt) : '-',
+             workStartTimeStr,
+             formatDateSafe(lot.updatedAt)
+         ];
+ 
+         // 1. 各ワークごとの工程実績
+         Array.from({ length: lot.quantity || 1 }).forEach((_, unitIdx) => {
+             const workNo = unitIdx + 1;
+             
+             if (lot.steps && lot.steps.length > 0) {
+                 lot.steps.forEach((step, idx) => {
+                     let actualDuration = 0;
+                     
+                     // 実績時間の算出
+                     if (lot.tasks) {
+                         const taskKey = `${idx}-${unitIdx}`;
+                         const task = lot.tasks[taskKey];
+                         if (task && task.status === 'completed') {
+                             actualDuration = task.duration;
+                         }
+                     } else if (lot.stepTimes && lot.stepTimes[step.id]) {
+                         actualDuration = Math.floor((lot.stepTimes[step.id] / 1000) / (lot.quantity || 1));
+                     }
+ 
+                     const achievementRate = actualDuration > 0 ? Math.round((step.targetTime / actualDuration) * 100) : 0;
+                     
+                     rows.push([
+                         lot.id,
+                         `#${workNo}`, 
+                         lot.model, lot.orderNo, lot.quantity, lot.status, zoneName,
+                         workers.find(w => w.id === lot.workerId)?.name || '未割当',
+                         lot.entryAt ? formatDateSafe(lot.entryAt) : '-',
+                         workStartTimeStr,
+                         formatDateSafe(lot.updatedAt),
+                         step.title,
+                         step.targetTime,
+                         actualDuration,
+                         achievementRate + '%',
+                         actualDuration > step.targetTime ? '目標超過' : ''
+                     ]);
+                 });
+             } else {
+                  rows.push([lot.id, `#${workNo}`, ...baseRow.slice(2), '-', '-', '-', '-', '-']);
+             }
+         });
+ 
+         // 2. 監視・不具合イベントの出力 (ワークNoは「全体」扱い)
+         if (lot.interruptions && lot.interruptions.length > 0) {
+             lot.interruptions.forEach(i => {
+                 rows.push([
+                     lot.id,
+                     '全体', // Work No
+                     lot.model, lot.orderNo, lot.quantity, lot.status, zoneName,
+                     workers.find(w => w.id === lot.workerId)?.name || '未割当',
+                     lot.entryAt ? formatDateSafe(lot.entryAt) : '-',
+                     workStartTimeStr,
+                     formatDateSafe(lot.updatedAt),
+                     i.type === 'monitoring' ? `監視: ${i.label}` : `不具合対応: ${i.label}`,
+                     '0', // 目標なし
+                     i.duration,
+                     '-',
+                     i.type === 'monitoring' ? '監視作業' : '不具合対応'
+                 ]);
+             });
+         }
+     });
+ 
+     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+     const link = document.createElement('a');
+     link.href = URL.createObjectURL(blob);
+     link.download = `genba_detailed_report_${new Date().toISOString().slice(0,10)}.csv`;
+     link.click();
+   };
+ 
+   return (
+     <div className="grid grid-cols-12 gap-6 h-full">
+       <div className="col-span-12 flex flex-col h-full">
+         <div className="mb-2 flex items-center justify-between">
+             <div className="flex items-center gap-4">
+                <button onClick={onBack} className="text-slate-500 hover:text-slate-800 flex items-center gap-1"><ArrowRight className="w-4 h-4 rotate-180"/> 戻る</button>
+                <h2 className="font-bold text-emerald-800 flex items-center gap-2"><CheckCircle2 className="w-6 h-6"/> 完了済みロット一覧 (全件表示)</h2>
+             </div>
+             <button onClick={handleExportCSV} className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-emerald-700 shadow-sm text-sm"><Download className="w-4 h-4"/> 詳細CSV出力</button>
+         </div>
+         <div className="flex-1 bg-emerald-50 rounded-xl border-2 border-emerald-200 shadow-xl overflow-hidden flex flex-col">
+           <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 content-start">
+              {lots.filter(l => l.location === 'completed').map(lot => (
+                <div key={lot.id}>
+                  <LotCard lot={lot} workers={workers} templates={templates} mapZones={mapZones} onOpenExecution={()=>{}} saveData={saveData} setDraggedLotId={()=>{}} draggedLotId={null} onEdit={onEditLot} onDelete={onDeleteLot} minimal={false}/>
+                </div>
+              ))}
+              {lots.filter(l => l.location === 'completed').length === 0 && <div className="col-span-full text-center py-10 text-slate-400">完了したロットはありません</div>}
+           </div>
+         </div>
+       </div>
+     </div>
+   );
+ };
+ 
+ const TemplatesView = ({ editingTemplate, setEditingTemplate, handleSaveTemplate, workers, saveData, deleteData, templates, handleExcelImport, handleBackupExport, handleBackupImport, excelInputRef, backupInputRef }) => (
+   <div className="p-8 max-w-5xl mx-auto space-y-6 h-full flex flex-col">
+     {editingTemplate ? (
+       <TemplateEditor template={editingTemplate} onSave={handleSaveTemplate} onCancel={() => setEditingTemplate(null)} />
+     ) : (
+       <>
+         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+           <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><Settings className="w-5 h-5" /> 作業者マスタ</h3>
+           <div className="flex gap-2 mb-4">
+             <input id="workerInput" className="border rounded px-3 py-2 text-sm flex-1" placeholder="新しい作業者名" />
+             <button onClick={() => { const input = document.getElementById('workerInput'); if(input && input.value) { saveData('workers', generateId(), { name: input.value }); input.value = ''; } }} className="bg-slate-800 text-white px-4 py-2 rounded text-sm font-bold">追加</button>
+           </div>
+           <div className="flex flex-wrap gap-2">
+             {workers.map(w => (<div key={w.id} className="bg-slate-50 border px-3 py-1.5 rounded-full flex items-center gap-2 text-sm">{w.name}<button onClick={() => deleteData('workers', w.id)} className="text-slate-400 hover:text-rose-500"><Trash2 className="w-3 h-3" /></button></div>))}
+           </div>
+         </div>
+         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex-1 overflow-hidden flex flex-col">
+           <div className="flex justify-between items-center mb-4">
+             <h3 className="font-bold text-lg flex items-center gap-2"><ClipboardList className="w-5 h-5" /> 工程テンプレート管理</h3>
+             <div className="flex gap-2">
+               <label className="text-xs flex items-center gap-1 cursor-pointer bg-green-50 text-green-700 px-3 py-2 rounded border border-green-200 hover:bg-green-100"><FileUp className="w-4 h-4"/> Excel取込<input type="file" ref={excelInputRef} accept=".xlsx" onChange={handleExcelImport} className="hidden"/></label>
+               <button onClick={handleBackupExport} className="text-xs flex items-center gap-1 bg-slate-100 text-slate-600 px-3 py-2 rounded border hover:bg-slate-200"><DownloadCloud className="w-4 h-4"/> バックアップ</button>
+               <label className="text-xs flex items-center gap-1 cursor-pointer bg-slate-100 text-slate-600 px-3 py-2 rounded border hover:bg-slate-200"><RefreshCw className="w-4 h-4"/> 復元<input type="file" ref={backupInputRef} accept=".json" onChange={handleBackupImport} className="hidden"/></label>
+             </div>
+           </div>
+           <button onClick={() => setEditingTemplate({ id: '', name: '', steps: [] })} className="w-full py-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 hover:border-blue-500 font-bold mb-4">+ 新規テンプレート作成</button>
+           <div className="flex-1 overflow-y-auto space-y-3">
+             {templates.map(t => (
+               <div key={t.id} className="border rounded-lg p-4 flex justify-between items-center group hover:border-blue-300 transition-colors cursor-pointer" onClick={() => setEditingTemplate(t)}>
+                 <div><div className="font-bold text-slate-800 group-hover:text-blue-600">{t.name}</div><div className="text-xs text-slate-500 mt-1">全 {t.steps?.length || 0} 工程</div></div>
+                 <div className="flex items-center gap-2"><button onClick={(e) => { e.stopPropagation(); setEditingTemplate(t); }} className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 rounded"><Pencil className="w-4 h-4"/></button><button onClick={(e) => { e.stopPropagation(); deleteData('templates', t.id); }} className="p-2 text-slate-400 hover:text-rose-600 bg-slate-50 rounded"><Trash2 className="w-4 h-4" /></button></div>
+               </div>
+             ))}
+           </div>
+         </div>
+       </>
+     )}
+   </div>
+ );
+ 
+ // --- Main Component ---
+ 
+ export default function App() {
+   // State: System
+   const [user, setUser] = useState(null);
+   const [db, setDb] = useState(null);
+   const [isConnected, setIsConnected] = useState(false);
+   const [syncStatus, setSyncStatus] = useState('idle');
+   const [errorMsg, setErrorMsg] = useState(null);
+   const [isExcelLoaded, setIsExcelLoaded] = useState(false);
+   const [dataCounts, setDataCounts] = useState({ lots: 0, templates: 0, workers: 0 });
+   const [dataSource, setDataSource] = useState('Checking...');
+   
+   // State: App Data
+   const [lots, setLots] = useState([]);
+   const [templates, setTemplates] = useState([]);
+   const [workers, setWorkers] = useState([]);
+   const [logs, setLogs] = useState([]);
+   const [settings, setSettings] = useState({ mapImage: null, mapZones: INITIAL_MAP_ZONES });
+ 
+   // State: UI
+   const [viewMode, setViewMode] = useState('dashboard');
+   const [activeTab, setActiveTab] = useState('main'); 
+   const [showLotModal, setShowLotModal] = useState(false);
+   const [selectedWorker, setSelectedWorker] = useState(null);
+   const [draggedLotId, setDraggedLotId] = useState(null);
+   const mapRef = useRef(null);
+   const excelInputRef = useRef(null);
+   const backupInputRef = useRef(null);
+ 
+   // State: Execution Modal
+   const [executionLotId, setExecutionLotId] = useState(null);
+ 
+   // State: Template Editor
+   const [editingTemplate, setEditingTemplate] = useState(null);
+ 
+   // State: Lot Editing
+   const [editingLot, setEditingLot] = useState(null);
+ 
+   // --- Initialize ExcelJS ---
+   useEffect(() => {
+     const script = document.createElement('script');
+     script.src = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+     script.async = true;
+     script.onload = () => setIsExcelLoaded(true);
+     document.body.appendChild(script);
+   }, []);
+ 
+   // --- Firebase Initialization ---
+   useEffect(() => {
+     if (!FIREBASE_CONFIG.apiKey) return;
+     const app = initializeApp(FIREBASE_CONFIG);
+     const auth = getAuth(app);
+     const firestore = getFirestore(app);
+     setDb(firestore);
+ 
+     const initAuth = async () => {
+       // Check if using user-defined config
+       const isUserConfig = USER_DEFINED_CONFIG.apiKey && USER_DEFINED_CONFIG.apiKey.length > 0;
+       
+       if (isUserConfig) {
+           // Force anonymous sign-in for user projects (avoids canvas token mismatch)
+           await signInAnonymously(auth);
+       } else if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+       } else {
+            await signInAnonymously(auth);
+       }
+     };
+     initAuth();
+ 
+     onAuthStateChanged(auth, (u) => {
+       setUser(u);
+       setIsConnected(!!u);
+     });
+   }, []);
+ 
+   // --- Data Sync ---
+   useEffect(() => {
+     if (!user || !db) return;
+     const getPath = (colName) => collection(db, 'artifacts', APP_DATA_ID, 'public', 'data', colName);
+ 
+     const unsubs = [
+       onSnapshot(getPath('lots'), { includeMetadataChanges: true }, (snap) => {
+           const data = snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => b.createdAt - a.createdAt);
+           setLots(data);
+           setDataCounts(prev => ({ ...prev, lots: data.length }));
+           setDataSource(snap.metadata.fromCache ? 'Cache (Offline)' : 'Server (Online)');
+       }),
+       onSnapshot(getPath('templates'), { includeMetadataChanges: true }, (snap) => {
+           const data = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+           setTemplates(data);
+           setDataCounts(prev => ({ ...prev, templates: data.length }));
+       }),
+       onSnapshot(getPath('workers'), { includeMetadataChanges: true }, (snap) => {
+           const data = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+           setWorkers(data);
+           setDataCounts(prev => ({ ...prev, workers: data.length }));
+       }),
+       onSnapshot(getPath('logs'), (snap) => setLogs(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => b.timestamp - a.timestamp))),
+       onSnapshot(doc(db, 'artifacts', APP_DATA_ID, 'public', 'data', 'settings', 'config'), (snap) => {
+         if (snap.exists()) {
+            const data = snap.data();
+            setSettings({ 
+              mapImage: data.mapImage || null,
+              mapZones: data.mapZones || INITIAL_MAP_ZONES 
+            });
+         }
+       })
+     ];
+     return () => unsubs.forEach(u => u());
+   }, [user, db]);
+ 
+   // --- Actions ---
+   const saveData = async (col, id, data) => {
+     if (!user || !db) {
+         setErrorMsg("Not authenticated. Cannot save data.");
+         return;
+     }
+     try {
+       setSyncStatus('syncing');
+       setErrorMsg(null);
+       
+       await setDoc(doc(db, 'artifacts', APP_DATA_ID, 'public', 'data', col, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+       setSyncStatus('idle');
+     } catch (e) { 
+         console.error(e); 
+         setSyncStatus('error'); 
+         setErrorMsg(e.message || "Unknown error during save");
+     }
+   };
+
+   // Reload Action
+    const handleReload = () => {
+        window.location.reload();
+    };
+   
+   // Test Write Action
+   const handleTestWrite = async () => {
+       if (!user || !db) return;
+       try {
+           setSyncStatus('syncing');
+           await setDoc(doc(db, 'artifacts', APP_DATA_ID, 'public', 'data', '_test_connection', 'ping'), { 
+               timestamp: serverTimestamp(),
+               user: user.uid,
+               appId: APP_DATA_ID,
+               status: "OK",
+               message: "If you see this, connection is working!"
+           });
+           
+           alert(`書き込みテスト成功！\n\nFirestoreコンソールで以下のパスを確認してください:\nartifacts/${APP_DATA_ID}/public/data/_test_connection/ping`);
+           setSyncStatus('idle');
+           setErrorMsg(null); // Clear error on success
+       } catch (e) {
+           console.error("Test write failed:", e);
+           const msg = e.code ? `[${e.code}] ${e.message}` : e.message;
+           alert("書き込みテスト失敗:\n" + msg);
+           setSyncStatus('error');
+           setErrorMsg(msg);
+       }
+   };
+ 
+   const saveSettings = async (newSettings) => {
+     if (!user || !db) return;
+     await setDoc(doc(db, 'artifacts', APP_DATA_ID, 'public', 'data', 'settings', 'config'), newSettings, { merge: true });
+   };
+ 
+   const deleteData = async (col, id) => {
+     if (!user || !db) return;
+     await deleteDoc(doc(db, 'artifacts', APP_DATA_ID, 'public', 'data', col, id));
+   };
+ 
+   // --- Worker Management ---
+   const handleAddWorker = () => {
+     const name = prompt("新しい作業者の名前を入力してください:");
+     if (name) {
+       saveData('workers', generateId(), { name });
+     }
+   };
+ 
+   // --- Advanced Import/Export (Restored) ---
+   
+   // 1. Excel Import
+   const handleExcelImport = async (e) => {
+     const file = e.target.files?.[0];
+     if (!file || !isExcelLoaded) return;
+     
+     try {
+         // @ts-ignore
+         const wb = new ExcelJS.Workbook();
+         await wb.xlsx.load(file);
+         const ws = wb.getWorksheet(1);
+         if (!ws) throw new Error('Sheet not found');
+ 
+         const importedTitle = ws.getCell('A1').value?.toString() || 'インポート標準書';
+         const newSteps = [];
+         const media = wb.model?.media || [];
+         const imageMap = new Map();
+         
+         // Extract images (Rough implementation based on rows)
+         if (ws.getImages) {
+            ws.getImages().forEach((img) => {
+              const rowIdx = Math.round(img.range.tl.nativeRow) + 1;
+              const mediaItem = media[parseInt(img.imageId)];
+              if (mediaItem && mediaItem.buffer) {
+                const binary = String.fromCharCode(...new Uint8Array(mediaItem.buffer));
+                const base64 = `data:image/${mediaItem.extension};base64,${window.btoa(binary)}`;
+                if (!imageMap.has(rowIdx)) imageMap.set(rowIdx, []);
+                imageMap.get(rowIdx)?.push(base64);
+              }
+            });
+         }
+ 
+         ws.eachRow((row, rowNumber) => {
+             if (rowNumber < 6) return; // Skip headers
+             const title = row.getCell(5).value?.toString();
+             const desc = row.getCell(6).value?.toString();
+             if (title) {
+                 newSteps.push({
+                     id: generateId(),
+                     title,
+                     description: desc || '',
+                     type: 'normal',
+                     targetTime: 0,
+                     images: imageMap.get(rowNumber) || []
+                 });
+             }
+         });
+ 
+         if (newSteps.length > 0) {
+             const id = generateId();
+             saveData('templates', id, { id, name: importedTitle, steps: newSteps });
+             alert(`「${importedTitle}」を取り込みました`);
+         } else {
+             alert('有効なデータが見つかりませんでした');
+         }
+     } catch (err) {
+         console.error(err);
+         alert('Excelの読み込みに失敗しました');
+     }
+     e.target.value = '';
+   };
+ 
+   // 2. Backup Export
+   const handleBackupExport = () => {
+     const data = { templates, workers, settings, savedAt: Date.now() };
+     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+     const url = URL.createObjectURL(blob);
+     const a = document.createElement('a');
+     a.href = url;
+     a.download = `genba_backup_${new Date().toISOString().slice(0,10)}.json`;
+     a.click();
+   };
+ 
+   // 3. Backup Import
+   const handleBackupImport = (e) => {
+     const file = e.target.files?.[0];
+     if (!file) return;
+     const reader = new FileReader();
+     reader.onload = (ev) => {
+       try {
+         const data = JSON.parse(ev.target?.result);
+         if (confirm('現在のデータを上書きして復元しますか？')) {
+           if (data.templates) data.templates.forEach(t => saveData('templates', t.id, t));
+           if (data.workers) data.workers.forEach(w => saveData('workers', w.id, w));
+           if (data.settings) saveSettings(data.settings);
+           alert('復元が完了しました');
+         }
+       } catch {
+         alert('ファイルの読み込みに失敗しました');
+       }
+     };
+     reader.readAsText(file);
+     e.target.value = '';
+   };
+ 
+   const handleAddLot = async (formData) => {
+     const { model, orderNo, quantity, templateId, priority, dueDate, entryAt } = formData;
+     
+     let steps = DEMO_STEPS;
+     const template = templates.find(t => t.id === templateId);
+     if (template && template.steps) {
+       steps = template.steps;
+     }
+ 
+     const batchId = generateId();
+     const timestamp = Date.now();
+     const entryTimestamp = entryAt ? new Date(entryAt).getTime() : timestamp;
+     
+     if (editingLot) {
+        await saveData('lots', editingLot.id, { 
+          model, orderNo, templateId, priority, dueDate, steps, quantity: Number(quantity),
+          entryAt: entryTimestamp 
+        });
+        setEditingLot(null);
+     } else {
+        // Single document for the batch, with quantity field
+        const id = generateId();
+        const lot = {
+            id, batchId, model, orderNo,
+            serialNo: `${orderNo}`, 
+            quantity: Number(quantity), 
+            templateId, priority: priority || 'normal',
+            dueDate: dueDate || '',
+            entryAt: entryTimestamp, 
+            status: 'waiting', 
+            location: 'arrival', 
+            mapZoneId: null, 
+            x: 0, y: 0, 
+            workerId: null, 
+            createdAt: timestamp,
+            currentStepIndex: 0,
+            steps: steps,
+            totalWorkTime: 0,
+            workStartTime: null,
+            tasks: {},
+            stepTimes: {},
+            interruptions: []
+        };
+        await saveData('lots', id, lot);
+        await saveData('logs', generateId(), { timestamp, type: 'CREATE', batchId, count: Number(quantity), model });
+     }
+     setShowLotModal(false);
+   };
+ 
+   const handleMoveLot = async (lotId, newLocation, workerId = null) => {
+     const lot = lots.find(l => l.id === lotId);
+     if (!lot) return;
+ 
+     // Location Logic for Dual Display (List & Map)
+     // 1. Move to "Worker Planned" (Buffer)
+     if (newLocation === 'planned') {
+        // Updates: location='planned', workerId=workerId, mapZoneId=keep existing(if any)
+        const updates = { location: 'planned' };
+        if (workerId) updates.workerId = workerId;
+        await saveData('lots', lotId, updates);
+     } 
+     // 2. Move to Map Zone (from Planned or Map)
+     else if (newLocation !== 'arrival' && newLocation !== 'completed' && newLocation !== 'planned') {
+        // This is a zone ID.
+        // Updates: mapZoneId=zoneId, workerId=keep or auto-assign, location='planned' (to keep in list)
+        const updates = { mapZoneId: newLocation };
+        if (!lot.workerId && selectedWorker) updates.workerId = selectedWorker.id;
+        // Ensure it stays in 'planned' list so it's visible in both
+        if (lot.location === 'arrival') updates.location = 'planned'; 
+        
+        await saveData('lots', lotId, updates);
+     }
+     // 3. Move to Completed
+     else if (newLocation === 'completed') {
+        await saveData('lots', lotId, { location: 'completed', status: 'completed', workStartTime: null });
+     }
+     // 4. Move back to Arrival
+     else if (newLocation === 'arrival') {
+        await saveData('lots', lotId, { location: 'arrival', mapZoneId: null, workerId: null });
+     }
+   };
+ 
+   const handleDropOnMap = (e) => {
+       e.preventDefault();
+       // Drop handling is now done by individual Zone/InteractiveMap components
+   };
+ 
+   const getWorkerName = (id) => workers.find(w => w.id === id)?.name || '未割当';
+ 
+   // --- Export ---
+   const exportToCSV = () => {
+     const headers = ['ID', '型式', '指図番号', '数量', '状態', '場所', '現在工程', '作業時間(秒)', '担当者', '登録日時', '入庫日時'];
+     const rows = lots.map(l => [
+       l.id, l.model, l.orderNo, l.quantity, l.status, l.location,
+       l.steps?.[l.currentStepIndex]?.title || '-',
+       Math.floor((l.totalWorkTime || 0) / 1000),
+       getWorkerName(l.workerId),
+       new Date(l.createdAt).toLocaleString(),
+       l.entryAt ? new Date(l.entryAt).toLocaleString() : '-'
+     ]);
+     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+     const link = document.createElement('a');
+     link.href = URL.createObjectURL(blob);
+     link.download = `genba_visual_${new Date().toISOString().slice(0,10)}.csv`;
+     link.click();
+   };
+ 
+   const handleImageUpload = (e) => {
+     const file = e.target.files[0];
+     if (file) {
+         const reader = new FileReader();
+         reader.onloadend = () => {
+             saveSettings({ mapImage: reader.result });
+         };
+         reader.readAsDataURL(file);
+     }
+   };
+ 
+   // --- Template Management ---
+   const handleSaveTemplate = (templateData) => {
+     const id = templateData.id || generateId();
+     saveData('templates', id, { ...templateData, id });
+     setEditingTemplate(null);
+   };
+   
+   // --- Lot Edit Handlers ---
+   const onEditLot = (lot) => {
+     setEditingLot(lot);
+     setShowLotModal(true);
+   };
+   
+   const onDeleteLot = (id) => {
+     if(confirm('このロットを削除しますか？\n（関連する作業ログは残ります）')) {
+        deleteData('lots', id);
+     }
+   };
+ 
+   return (
+     <div className="h-screen bg-slate-100 font-sans flex flex-col text-slate-900 overflow-hidden">
+       <header className="h-14 bg-slate-900 text-white flex items-center justify-between px-6 shadow-md z-50 shrink-0">
+         <div className="flex items-center gap-3">
+           <div className="bg-blue-600 p-1.5 rounded"><Layout className="w-5 h-5 text-white" /></div>
+           <h1 className="font-bold text-lg tracking-tight">Genba Visual Cloud <span className="text-xs font-normal text-slate-400 ml-1">Pro</span></h1>
+         </div>
+         <div className="flex items-center gap-4">
+           <div className="flex bg-slate-800 rounded-lg p-1">
+              {[
+                { id: 'main', label: '現場マップ', icon: MapIcon },
+                { id: 'analysis', label: '分析', icon: BarChart3 },
+                { id: 'templates', label: 'マスタ設定', icon: Settings },
+              ].map(tab => (
+                <button 
+                  key={tab.id}
+                  onClick={() => { setActiveTab(tab.id); setViewMode('dashboard'); }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === tab.id ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                >
+                  <tab.icon className="w-4 h-4" /> {tab.label}
+                </button>
+              ))}
+           </div>
+           <button onClick={() => { setEditingLot(null); setShowLotModal(true); }} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-md text-sm font-bold flex items-center gap-2 shadow-sm">
+             <Plus className="w-4 h-4" /> 入荷登録
+           </button>
+         </div>
+       </header>
+       
+       <main className="flex-1 overflow-hidden relative bg-slate-100 p-4 h-[calc(100vh-3.5rem)]">
+         {activeTab === 'main' && (
+           <div className="h-full">
+             {viewMode === 'dashboard' && <DashboardView onSetMode={setViewMode} lots={lots} workers={workers} handleMoveLot={handleMoveLot} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} setExecutionLotId={setExecutionLotId} settings={settings} templates={templates} onEditLot={onEditLot} onDeleteLot={onDeleteLot} handleImageUpload={handleImageUpload} saveSettings={saveSettings} mapZones={settings.mapZones} />}
+             {viewMode === 'arrival-planning' && <ArrivalPlanningView onBack={() => setViewMode('dashboard')} lots={lots} workers={workers} templates={templates} handleMoveLot={handleMoveLot} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} handleAddWorker={handleAddWorker} onEditLot={onEditLot} onDeleteLot={onDeleteLot} mapZones={settings.mapZones} />}
+             {viewMode === 'planning-execution' && <PlanningExecutionView onBack={() => setViewMode('dashboard')} workers={workers} lots={lots} templates={templates} handleMoveLot={handleMoveLot} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} setSelectedWorker={setSelectedWorker} handleImageUpload={handleImageUpload} settings={settings} mapRef={mapRef} handleDropOnMap={handleDropOnMap} setExecutionLotId={setExecutionLotId} onEditLot={onEditLot} onDeleteLot={onDeleteLot} saveSettings={saveSettings} mapZones={settings.mapZones} />}
+             {viewMode === 'completed-list' && <CompletedListView onBack={() => setViewMode('dashboard')} lots={lots} workers={workers} templates={templates} mapZones={settings.mapZones} saveData={saveData} onEditLot={onEditLot} onDeleteLot={onDeleteLot} />}
+             {viewMode === 'map-only' && <MapOnlyView onBack={() => setViewMode('dashboard')} lots={lots} workers={workers} templates={templates} handleMoveLot={handleMoveLot} saveData={saveData} setDraggedLotId={setDraggedLotId} draggedLotId={draggedLotId} setExecutionLotId={setExecutionLotId} settings={settings} handleImageUpload={handleImageUpload} saveSettings={saveSettings} mapZones={settings.mapZones} onEditLot={onEditLot} onDeleteLot={onDeleteLot} />}
+           </div>
+         )}
+         {activeTab === 'analysis' && <AnalysisView lots={lots} logs={logs} workers={workers} />}
+         {activeTab === 'templates' && <TemplatesView editingTemplate={editingTemplate} setEditingTemplate={setEditingTemplate} handleSaveTemplate={handleSaveTemplate} workers={workers} saveData={saveData} deleteData={deleteData} templates={templates} handleExcelImport={handleExcelImport} handleBackupExport={handleBackupExport} handleBackupImport={handleBackupImport} excelInputRef={excelInputRef} backupInputRef={backupInputRef} />}
+       </main>
+       
+       {/* Execution Modal */}
+       {executionLotId && (
+         <WorkExecutionModal 
+           lot={lots.find(l => l.id === executionLotId)} 
+           onClose={() => setExecutionLotId(null)}
+           onSave={(updates) => saveData('lots', executionLotId, updates)}
+           onFinish={() => setExecutionLotId(null)}
+         />
+       )}
+ 
+       {showLotModal && (
+         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg">
+             <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+               <Package className="w-6 h-6" /> {editingLot ? 'ロット情報編集' : '新規ロット登録'}
+             </h2>
+             <form onSubmit={(e) => {
+               e.preventDefault();
+               handleAddLot(Object.fromEntries(new FormData(e.target)));
+             }} className="space-y-4">
+               <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">型式 (Model)</label>
+                    <input name="model" defaultValue={editingLot?.model} required className="w-full border rounded p-2 bg-slate-50" placeholder="例: A-100" />
+                 </div>
+                 <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">指図番号</label>
+                    <input name="orderNo" defaultValue={editingLot?.orderNo} required className="w-full border rounded p-2 bg-slate-50" placeholder="例: 001" />
+                 </div>
+               </div>
+               <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">台数</label>
+                    {/* 編集時は台数変更不可 */}
+                    <input name="quantity" type="number" min="1" defaultValue="1" disabled={!!editingLot} className="w-full border rounded p-2 bg-slate-50 disabled:opacity-50" />
+                 </div>
+                 <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">適用テンプレート</label>
+                    <select name="templateId" defaultValue={editingLot?.templateId} className="w-full border rounded p-2 bg-slate-50">
+                      <option value="demo">詳細デモ手順 (4工程)</option>
+                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                 </div>
+               </div>
+               
+               <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">優先度</label>
+                    <select name="priority" defaultValue={editingLot?.priority || 'normal'} className="w-full border rounded p-2 bg-slate-50">
+                      <option value="normal">通常</option>
+                      <option value="high">急ぎ</option>
+                    </select>
+                 </div>
+                 <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">納期</label>
+                    <input name="dueDate" defaultValue={editingLot?.dueDate} type="date" className="w-full border rounded p-2 bg-slate-50" />
+                 </div>
+               </div>
+ 
+               {/* Added: Entry Date Field */}
+               <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">入庫日時</label>
+                  <input 
+                    name="entryAt" 
+                    type="datetime-local" 
+                    defaultValue={editingLot?.entryAt ? toDatetimeLocal(editingLot.entryAt) : toDatetimeLocal(Date.now())}
+                    className="w-full border rounded p-2 bg-slate-50" 
+                  />
+               </div>
+ 
+               <div className="flex justify-end gap-3 mt-8">
+                 <button type="button" onClick={() => setShowLotModal(false)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded font-bold">キャンセル</button>
+                 <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded font-bold shadow-lg shadow-blue-500/30 hover:bg-blue-700">{editingLot ? '更新' : '登録実行'}</button>
+               </div>
+             </form>
+           </div>
+         </div>
+       )}
+       {/* Debug Status Panel */}
+       <DebugStatus isConnected={isConnected} user={user} dataCounts={dataCounts} syncStatus={syncStatus} appId={APP_DATA_ID} errorMsg={errorMsg} dataSource={dataSource} onTestWrite={handleTestWrite} projectId={USER_DEFINED_CONFIG.projectId} onReload={handleReload} />
+     </div>
+   );
+ }
